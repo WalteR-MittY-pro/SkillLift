@@ -1,0 +1,73 @@
+baseline: coevoskills
+profile_id: paper_default
+paper_reference:
+  type: arxiv
+  id: 2604.01687v2
+  title: "CoEvoSkills: Self-Evolving Agent Skills via Co-Evolutionary Verification"
+paper_default_params:
+  max_oracle_interventions: 5
+  max_surrogate_retries: 15
+  min_turns: 1
+  max_turns: 20
+  token_budget_reference_root: runs/taskoutput-gpt5.4
+  token_budget_multiplier: 2.0
+  context_cap_ratio: 0.7
+  max_context_chars: 200000
+  oracle_threshold: 1.0
+  surrogate_timeout_seconds: 30
+  surrogate_docker_image: wildclawbench-ubuntu:v1.3
+  evolution_timeout_seconds: 3000
+  evolution_workers: 4
+  evaluation_timeout_seconds: 7200
+  evaluation_workers: 10
+  evaluation_repeats: 5
+  initial_suite_policy: generate_before_first_score_v1
+  surrogate_counter_policy: surrogate_failure_repairs_v1
+resolved_params:
+  max_oracle_interventions: 5
+  max_surrogate_retries: 15
+  min_turns: 1
+  max_turns: 20
+  token_budget_reference_root: runs/taskoutput-gpt5.4
+  token_budget_multiplier: 2.0
+  context_cap_ratio: 0.7
+  max_context_chars: 200000
+  oracle_threshold: 1.0
+  surrogate_timeout_seconds: 30
+  surrogate_docker_image: wildclawbench-ubuntu:v1.3
+  evolution_timeout_seconds: 3000
+  evolution_workers: 4
+  evaluation_timeout_seconds: 7200
+  evaluation_workers: 10
+  evaluation_repeats: 5
+  initial_suite_policy: generate_before_first_score_v1
+  surrogate_counter_policy: surrogate_failure_repairs_v1
+override_diff: {}
+created_at: '2026-07-13T00:00:00+08:00'
+needs_confirmation: false
+source_notes:
+  - parameter: token_budget_multiplier
+    value: 2.0
+    source: project matched-budget protocol
+    status: explicit_adaptation
+    notes: Uses per-task CoEvo framework-plus-Docker usage as the reference base.
+  - parameter: min_turns_and_max_turns
+    value: [1, 20]
+    source: project matched-budget protocol
+    status: explicit_adaptation
+    notes: The upper bound preserves the existing 15 surrogate plus 5 Oracle limits.
+  - parameter: max_oracle_interventions
+    value: 5
+    source: arXiv:2604.01687v2 Algorithm 1 and Appendix A Table A1
+    status: verified
+  - parameter: max_surrogate_retries
+    value: 15
+    source: arXiv:2604.01687v2 Algorithm 1 and Appendix A Table A1
+    status: verified
+  - parameter: context_cap_ratio
+    value: 0.7
+    source: arXiv:2604.01687v2 Algorithm 1
+    status: verified
+  - parameter: initial_suite_policy
+    source: implementation decision for underspecified empty V(0)
+    status: explicit_adaptation

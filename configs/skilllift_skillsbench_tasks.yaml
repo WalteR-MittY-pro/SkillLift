@@ -1,0 +1,60 @@
+project_root: ..
+run_root: runs/skilllift_skillsbench_tasks
+
+skillsbench:
+  split_path: skilllift_eval/benchmarks/skillsbench_split_v1.json
+  tasks_root: skillsbench/tasks
+  python_executable: skillsbench/.venv/bin/python
+  prebuilt_image_template: "prewarm/{task_id}:prewarm"
+  default_model: gpt
+  agent: openhands
+  model_endpoints:
+    gpt:
+      provider: vllm
+      model_env: GPT_MODEL
+      base_url_env: GPT_BASE_URL
+      api_key_env: GPT_API_KEY
+    claude:
+      provider: vllm
+      model_env: CLAUDE_MODEL
+      base_url_env: CLAUDE_BASE_URL
+      api_key_env: CLAUDE_API_KEY
+    glm:
+      provider: vllm
+      model_env: GLM_MODEL
+      base_url_env: GLM_BASE_URL
+      api_key_env: GLM_API_KEY
+      agent: openhands-sse
+      stream: true
+    qwen:
+      provider: vllm
+      model_env: QWEN_MODEL
+      base_url_env: QWEN_BASE_URL
+      api_key_env: QWEN_API_KEY
+    deepseek:
+      provider: vllm
+      model_env: DEEPSEEK_MODEL
+      base_url_env: DEEPSEEK_BASE_URL
+      api_key_env: DEEPSEEK_API_KEY
+  sandbox: docker
+  patch_source: scripts/oh_skill_patch.py
+
+skilllift:
+  candidate_concurrency: 2
+  max_context_chars: 120000
+  mode_a_iters: 2
+  mode_b_iters: 2
+  mode_a_min_score_threshold: 0.85
+  rank_alignment_threshold: 0.9
+  terminal_threshold: 0.9
+
+coevoskills:
+  max_oracle_interventions: 5
+  max_surrogate_retries: 15
+  min_turns: 1
+  max_turns: 20
+  max_context_chars: 120000
+  oracle_threshold: 1.0
+  surrogate_docker_image: wildclawbench-ubuntu:v1.3
+  evaluation_repeats: 5
+

@@ -1,0 +1,142 @@
+baseline: textgrad
+profile_id: paper_default
+paper_reference: TextGrad local PDF
+source:
+  required_by: SPEC.md §9 item 6
+  path: textgrad/textgrad.pdf
+  exists: true
+  file_size_bytes: 1336878
+  extraction_status: extracted_with_pypdf
+  extraction_tool: pypdf 6.13.3
+  extracted_text_chars: 132644
+paper_default_params:
+  optimizer: TextualGradientDescent
+  optimized_variable_for_skill_baseline: skill_or_prompt_text
+  update_rule: textual_gradient_descent_step
+  instance_solution_optimization_iterations: 3
+  instance_solution_majority_voting: true
+  instance_solution_generation_temperature: 0
+  prompt_optimization_batch_size: 3
+  prompt_optimization_iterations: 12
+  prompt_optimization_total_training_examples_seen: 36
+  prompt_optimization_sampling: random_with_replacement
+  prompt_optimization_validation_after_each_iteration: true
+  prompt_update_acceptance: update_if_validation_improves
+  gradient_engine_model_in_paper_prompt_optimization: gpt-4o
+  forward_model_in_paper_prompt_optimization: gpt-3.5-turbo-0125
+  initial_prompt_strategy: zero_shot_chain_of_thought
+  dspy_baseline_candidate_programs: 10
+  dspy_baseline_few_shot_examples: 8
+  momentum_default: disabled_unless_explicitly_enabled
+  momentum_window_when_enabled_example: 3
+repo_default_params_observed: {}
+resolved_params:
+  optimizer: TextualGradientDescent
+  optimized_variable_for_skill_baseline: skill_or_prompt_text
+  update_rule: textual_gradient_descent_step
+  prompt_optimization_batch_size: 3
+  prompt_optimization_iterations: 12
+  prompt_optimization_total_training_examples_seen: 36
+  prompt_optimization_sampling: random_with_replacement
+  prompt_optimization_validation_after_each_iteration: true
+  prompt_update_acceptance: update_if_validation_improves
+  initial_prompt_strategy: zero_shot_chain_of_thought
+  momentum_default: disabled_unless_explicitly_enabled
+override_diff: {}
+param_hash: pending_phase_1_implementation
+created_at: '2026-06-22T00:00:00-07:00'
+needs_confirmation: false
+needs_confirmation_reasons: []
+source_notes:
+  - parameter: optimizer
+    value: TextualGradientDescent
+    source: textgrad/textgrad.pdf
+    page: 5
+    section: Example optimizer
+    status: verified
+    notes: Paper defines TGD as the textual optimizer step for updating a variable from feedback.
+  - parameter: instance_solution_optimization_iterations
+    value: 3
+    source: textgrad/textgrad.pdf
+    page: 9
+    section: 3.2 Solution optimization for question answering / Method
+    status: verified
+  - parameter: instance_solution_majority_voting
+    value: true
+    source: textgrad/textgrad.pdf
+    page: 9
+    section: 3.2 Method
+    status: verified
+  - parameter: instance_solution_generation_temperature
+    value: 0
+    source: textgrad/textgrad.pdf
+    page: 9
+    section: 3.2 Method
+    status: verified
+    notes: Paper contrasts official temperature 0.5 with tested CoT at temperature 0; use as generation baseline setting where applicable.
+  - parameter: prompt_optimization_batch_size
+    value: 3
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Prompt optimization for reasoning / Methods
+    status: verified
+  - parameter: prompt_optimization_iterations
+    value: 12
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: prompt_optimization_total_training_examples_seen
+    value: 36
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: prompt_optimization_sampling
+    value: random_with_replacement
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: prompt_optimization_validation_after_each_iteration
+    value: true
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: prompt_update_acceptance
+    value: update_if_validation_improves
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: gradient_engine_model_in_paper_prompt_optimization
+    value: gpt-4o
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: forward_model_in_paper_prompt_optimization
+    value: gpt-3.5-turbo-0125
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Methods
+    status: verified
+  - parameter: dspy_baseline_candidate_programs
+    value: 10
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Baselines
+    status: verified_baseline_only
+  - parameter: dspy_baseline_few_shot_examples
+    value: 8
+    source: textgrad/textgrad.pdf
+    page: 11
+    section: 3.3 Baselines
+    status: verified_baseline_only
+  - parameter: momentum_window_when_enabled_example
+    value: 3
+    source: textgrad/textgrad.pdf
+    page: 30
+    section: Appendix / Momentum
+    status: verified_optional_feature_example

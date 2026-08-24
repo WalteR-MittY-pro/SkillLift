@@ -1,0 +1,23 @@
+baseline: human_skill
+profile_id: paper_default
+paper_reference: not_applicable_static_human_authored_baseline
+paper_default_params:
+  skill_selection: exact_task_id_match
+  skills_per_task: 1
+  source_format: markdown_skill_document
+resolved_params:
+  skill_selection: exact_task_id_match
+  skills_per_task: 1
+  source_format: markdown_skill_document
+override_diff: {}
+created_at: '2026-07-20T00:00:00+08:00'
+needs_confirmation: false
+source_notes:
+  - parameter: skill_selection
+    value: exact_task_id_match
+    source: skills.zip
+    status: supplied_artifact
+  - parameter: skills_per_task
+    value: 1
+    source: skills.zip
+    status: verified_60_skills_for_60_tasks

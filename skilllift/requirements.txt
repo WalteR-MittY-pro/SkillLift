@@ -1,0 +1,11 @@
+weasyprint
+pymupdf
+requests
+certifi
+yt-dlp
+modelscope
+python-dotenv
+pyyaml
+gradio==6.14.0
+tiktoken==0.13.0
+json-repair==0.*

@@ -1,0 +1,38 @@
+profile_id: matched_v1
+status: reserved_interface_only
+evaluation_mode: budget_matched
+visible_feedback_policy_id: public_sanitized_v1
+oracle_call_budget: matched_v1
+task_sample_policy_id: matched_v1_fixed_order
+round_budget: matched_v1
+token_budget: matched_v1
+public_feedback_token_cap_per_round: null
+failed_sample_count_cap_per_round: null
+oracle_or_benchmark_call_cap: null
+fixed_task_order_path: null
+round_or_benchmark_call_budget: null
+token_cost_recording:
+  estimated_usage_required: true
+  actual_usage_required_when_available: true
+  actual_usage_unavailable_value: unavailable
+adapter_controls_only:
+  - adapter input cropping
+  - fixed task samples
+  - oracle or benchmark call limits
+  - round limits
+  - token and cost recording
+must_not_change:
+  - baseline core algorithm logic
+  - baseline native memory mechanism
+  - baseline native compression mechanism
+  - baseline native retrieval mechanism
+not_current_batch:
+  run: false
+  aggregate: false
+  write_process_md: false
+needs_future_confirmation:
+  - Numeric public feedback token cap
+  - Failed sample count cap
+  - Oracle or benchmark call cap
+  - Fixed task order artifact path
+  - Round or benchmark-call budget

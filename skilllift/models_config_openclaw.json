@@ -1,0 +1,21 @@
+{
+  "mode": "merge",
+  "moduleModels": {
+    "openclaw_agent": "openai/${GPT_MODEL}",
+    "judge": "openai/${GPT_MODEL}",
+    "oracle": "openai/${GPT_MODEL}"
+  },
+  "providers": {
+    "openai": {
+      "baseUrl": "${GPT_BASE_URL}",
+      "apiKey": "${GPT_API_KEY}",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "${GPT_MODEL}",
+          "name": "openai/${GPT_MODEL}"
+        }
+      ]
+    }
+  }
+}

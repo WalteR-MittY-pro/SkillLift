@@ -1,0 +1,21 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+
+# system / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# run outputs (A0 contracts under runs/task_0_2_to_0_5 are tracked)
+runs/*
+!runs/task_0_2_to_0_5/
+!runs/task_0_2_to_0_5/**

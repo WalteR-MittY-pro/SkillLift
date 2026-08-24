@@ -1,0 +1,72 @@
+baseline: skilllift
+profile_id: paper_default
+paper_reference:
+  type: project_default
+  note: >
+    SkillLift 的当前算法权威是 CoordinatorConfig 与 SkillLiftPortfolioCoordinator。
+    本 profile 保留历史实验值；未映射到 CoordinatorConfig 的旧键不控制当前算法。
+source:
+  required_by: SDD/SPEC.md §9 item 6
+  primary: skilllift/skilllift/coordinator/task.py
+  primary_lines: 35-44
+  secondary: skilllift/skilllift/skilllift.py
+  secondary_section: SkillLiftPortfolioCoordinator
+  type: project_default
+paper_default_params:
+  outer_rounds: 3
+  mode_a_iters: 2
+  mode_b_iters: 2
+  skill_count: 4
+  mode_a_min_score_threshold: 0.85
+  rank_alignment_threshold: 0.9
+  terminal_reward: 0.9
+repo_default_params_observed:
+  note: >
+    两个官方 runner 只把下列五个核心参数映射到 CoordinatorConfig；
+    outer_rounds 与 skill_count 是历史 profile 元数据，当前 runner 不消费。
+  source: skilllift/skilllift/coordinator/task.py:35-44
+  coordinator_config_defaults:
+    max_rounds: 3
+    max_candidates_per_round: 3
+    candidate_concurrency: 2
+    mode_a_iters: 2
+    mode_b_iters: 2
+    mode_a_min_score_threshold: 0.85
+    rank_alignment_threshold: 0.9
+resolved_params:
+  outer_rounds: 3
+  mode_a_iters: 2
+  mode_b_iters: 2
+  skill_count: 4
+  mode_a_min_score_threshold: 0.85
+  rank_alignment_threshold: 0.9
+  terminal_reward: 0.9
+override_diff: {}
+param_hash: pending_phase_1_implementation
+created_at: '2026-06-22T00:00:00-07:00'
+needs_confirmation: false
+source_notes:
+  - parameter: outer_rounds
+    value: 3
+    primary_source: skilllift/skilllift/coordinator/task.py:36
+    secondary_source: skilllift/skilllift/skilllift.py:69
+    status: legacy_unmapped
+    discrepancy_note: >
+      当前 runner 不消费 outer_rounds；核心使用 CoordinatorConfig.max_rounds=3。
+  - parameter: mode_a_iters
+    value: 2
+    primary_source: skilllift/skilllift/coordinator/task.py:41
+    secondary_source: skilllift/skilllift/skilllift.py:69
+    status: verified
+  - parameter: mode_b_iters
+    value: 2
+    primary_source: skilllift/skilllift/coordinator/task.py:42
+    secondary_source: skilllift/skilllift/skilllift.py:69
+    status: verified
+  - parameter: skill_count
+    value: 4
+    primary_source: skilllift/skilllift/coordinator/task.py:37
+    secondary_source: skilllift/skilllift/skilllift.py:69
+    status: legacy_unmapped
+    discrepancy_note: >
+      当前 runner 不消费 skill_count；核心使用 CoordinatorConfig.max_candidates_per_round=3。

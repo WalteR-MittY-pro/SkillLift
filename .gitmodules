@@ -1,0 +1,9 @@
+[submodule "WildClawBench"]
+	url = https://github.com/WalteR-MittY-pro/WildClawBench.git
+	path = WildClawBench
+[submodule "tau2-bench"]
+	url = https://github.com/WalteR-MittY-pro/tau2-bench.git
+	path = tau2-bench
+[submodule "skillsbench"]
+	url = https://github.com/WalteR-MittY-pro/skillsbench.git
+	path = skillsbench

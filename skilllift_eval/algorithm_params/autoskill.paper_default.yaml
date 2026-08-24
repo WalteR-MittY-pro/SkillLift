@@ -1,0 +1,113 @@
+baseline: autoskill
+profile_id: paper_default
+paper_reference: AutoSkill local PDF
+source:
+  required_by: SPEC.md §9 item 6
+  path: AutoSkill/autoskill.pdf
+  exists: true
+  file_size_bytes: 1204737
+  extraction_status: extracted_with_pypdf
+  extraction_tool: pypdf 6.13.3
+  extracted_text_chars: 67764
+paper_default_params:
+  skill_extraction_evidence_source: user_queries_only
+  skill_extraction_window: recent_user_query_sequence
+  skill_candidate_schema_fields:
+    - name
+    - description
+    - prompt
+    - triggers
+    - tags
+    - examples
+    - confidence
+  skill_management_actions:
+    - add
+    - merge
+    - discard
+  management_retrieval_scoring: hybrid_dense_sparse_relevance
+  management_retrieval_weight_alpha: paper_symbolic_unspecified_numeric_default
+  management_neighbor_set: top_m_symbolic_unspecified_numeric_default
+  default_user_skill_store: SkillBank/Users/<user_id>/...
+  default_shared_skill_store: SkillBank/Common/...
+  default_vector_cache_store: SkillBank/vectors/...
+  canonical_skill_artifact: SKILL.md
+  evolution_execution_mode: asynchronous_background_skill_evolution
+repo_default_params_observed: {}
+resolved_params:
+  skill_extraction_evidence_source: user_queries_only
+  skill_extraction_window: recent_user_query_sequence
+  skill_candidate_schema_fields:
+    - name
+    - description
+    - prompt
+    - triggers
+    - tags
+    - examples
+    - confidence
+  skill_management_actions:
+    - add
+    - merge
+    - discard
+  management_retrieval_scoring: hybrid_dense_sparse_relevance
+  management_retrieval_weight_alpha: paper_symbolic_unspecified_numeric_default
+  management_neighbor_set: top_m_symbolic_unspecified_numeric_default
+  default_user_skill_store: SkillBank/Users/<user_id>/...
+  default_shared_skill_store: SkillBank/Common/...
+  default_vector_cache_store: SkillBank/vectors/...
+  canonical_skill_artifact: SKILL.md
+  evolution_execution_mode: asynchronous_background_skill_evolution
+override_diff: {}
+param_hash: pending_phase_1_implementation
+created_at: '2026-06-22T00:00:00-07:00'
+needs_confirmation: false
+needs_confirmation_reasons: []
+source_notes:
+  - parameter: skill_extraction_evidence_source
+    value: user_queries_only
+    source: AutoSkill/autoskill.pdf
+    page: 6
+    section: 3.4.1 Skill Extraction from Interaction
+    status: verified
+    notes: pypdf text says the framework uses user queries as extraction evidence and assistant turns only as context.
+  - parameter: skill_candidate_schema_fields
+    value: [name, description, prompt, triggers, tags, examples, confidence]
+    source: AutoSkill/autoskill.pdf
+    page: 6
+    section: 3.4.1 Skill Extraction from Interaction
+    status: verified
+  - parameter: skill_management_actions
+    value: [add, merge, discard]
+    source: AutoSkill/autoskill.pdf
+    page: 7
+    section: 3.4.2 Retrieval-Assisted Skill Management
+    status: verified
+  - parameter: management_retrieval_scoring
+    value: hybrid dense/sparse relevance Rel_m(z_t,s)=alpha*d_hat+(1-alpha)*b_hat
+    source: AutoSkill/autoskill.pdf
+    page: 7
+    section: 3.4.2 Retrieval-Assisted Skill Management
+    status: verified
+  - parameter: management_retrieval_weight_alpha
+    value: paper_symbolic_unspecified_numeric_default
+    source: AutoSkill/autoskill.pdf
+    page: 7
+    section: 3.4.2 Retrieval-Assisted Skill Management
+    status: verified_no_numeric_default_given
+  - parameter: management_neighbor_set
+    value: top_m_symbolic_unspecified_numeric_default
+    source: AutoSkill/autoskill.pdf
+    page: 7
+    section: 3.4.2 Retrieval-Assisted Skill Management
+    status: verified_no_numeric_default_given
+  - parameter: default_storage_layout
+    value: SkillBank users/common/vectors with SKILL.md artifact
+    source: AutoSkill/autoskill.pdf
+    page: 10
+    section: 4.5 Storage Layout and Persistence
+    status: verified
+  - parameter: evolution_execution_mode
+    value: asynchronous_background_skill_evolution
+    source: AutoSkill/autoskill.pdf
+    page: 10
+    section: 4.4/4.5 implementation discussion
+    status: verified

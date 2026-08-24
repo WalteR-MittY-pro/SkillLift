@@ -1,0 +1,25 @@
+{
+  "moduleModels": {
+    "skill_generator": "${GLM_MODEL}",
+    "rubricator": "${GLM_MODEL}",
+    "verifier": "${GLM_MODEL}"
+  },
+  "runtime": {
+    "llm_timeout_seconds": 300,
+    "llm_max_retries": 1
+  },
+  "stream": true,
+  "providers": {
+    "glm-coding-plan": {
+      "baseUrl": "${GLM_BASE_URL}",
+      "apiKey": "${GLM_API_KEY}",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "${GLM_MODEL}",
+          "name": "zhipu/${GLM_MODEL}"
+        }
+      ]
+    }
+  }
+}

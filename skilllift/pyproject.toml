@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skilllift"
+version = "0.1.0"
+description = "SkillLift core: portfolio coordinator, Mode A/B skill evolution, rubricator, verifier, benchmark adapters"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "pyyaml",
+    "python-dotenv",
+    "json-repair>=0.20",
+    "certifi",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.3,<9"]
+
+[tool.setuptools.packages.find]
+include = ["skilllift*", "coevoskills*"]

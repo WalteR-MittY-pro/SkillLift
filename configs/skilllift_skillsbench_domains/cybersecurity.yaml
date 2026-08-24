@@ -1,0 +1,22 @@
+project_root: ../..
+run_root: runs/skilllift_skillsbench_cybersecurity_gpt54mini_v1
+
+skillsbench:
+  split_path: skilllift_eval/benchmarks/skillsbench_split_v1.json
+  tasks_root: skillsbench/tasks
+  python_executable: skillsbench/.venv/bin/python
+  model: vllm/gpt-5.4-mini
+  sandbox: docker
+  trials: 3
+  base_url_env: SKILLSBENCH_LLM_BASE_URL
+  api_key_env: SKILLSBENCH_LLM_API_KEY
+
+skilllift:
+  skill_count: 4
+  skill_format: agent_skill
+  outer_rounds: 3
+  mode_a_iters: 3
+  mode_b_iters: 3
+  oracle_threshold: 0.75
+  mode_a_min_score_threshold: 0.85
+  rank_alignment_threshold: 0.8

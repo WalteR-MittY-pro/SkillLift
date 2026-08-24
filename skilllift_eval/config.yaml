@@ -1,0 +1,87 @@
+model_endpoints:
+  gpt-5.4:
+    provider: openai-completions
+    provider_model_id: gpt-5.4
+    base_url_env: GPT_BASE_URL
+    api_key_env: GPT_API_KEY
+    timeout_seconds: 300
+    max_retries: 4
+    selection_note: endpoint selected from GPT_* variables in .env for Task 0.1 verification
+  opus-4.7:
+    provider: openai-completions
+    provider_model_id: claude-opus-4-7
+    base_url_env: CLAUDE_BASE_URL
+    api_key_env: CLAUDE_API_KEY
+    timeout_seconds: 300
+    max_retries: 2
+    selection_note: endpoint selected from CLAUDE_* variables in .env for Task 0.1 verification
+  glm-5.1:
+    provider: openai-completions
+    provider_model_id_env: GLM_MODEL
+    base_url_env: GLM_BASE_URL
+    api_key_env: GLM_API_KEY
+    timeout_seconds: 300
+    max_retries: 4
+    stream: true
+    selection_note: GLM endpoint from GLM_* variables in .env, same gateway as skilllift scripts
+  qwen-3.7plus:
+    provider: openai-completions
+    provider_model_id: Qwen3.7-Plus
+    base_url_env: QWEN_BASE_URL
+    api_key_env: QWEN_API_KEY
+    timeout_seconds: 300
+    max_retries: 2
+    selection_note: Qwen endpoint from QWEN_* variables, same gateway as skilllift scripts
+  deepseek:
+    provider: openai-completions
+    provider_model_id_env: DEEPSEEK_MODEL
+    base_url_env: DEEPSEEK_BASE_URL
+    api_key_env: DEEPSEEK_API_KEY
+    timeout_seconds: 300
+    max_retries: 2
+    selection_note: DeepSeek endpoint from DEEPSEEK_* variables, same gateway as skilllift scripts
+
+context_budgets:
+  native_default:
+    context_budget_profile: native_default
+    visible_feedback_policy_id: public_sanitized_v1
+    oracle_call_budget: native_default
+    task_sample_policy_id: full_native_v1
+    round_budget: paper_default
+    token_budget: native_default
+  matched_v1:
+    context_budget_profile: matched_v1
+    visible_feedback_policy_id: public_sanitized_v1
+    oracle_call_budget: matched_v1
+    task_sample_policy_id: matched_v1
+    round_budget: matched_v1
+    token_budget: matched_v1
+
+matrix:
+  baselines:
+    - no_skill
+    - autoskill
+    - textgrad
+    - skilllift
+  benchmarks:
+    wildclawbench:
+      full_task_count: 60
+      task_set_id: wildclawbench_full_60
+    tau2:
+      domains:
+        - airline
+        - retail
+        - telecom
+      split: base
+      task_set_id: tau2_official_base_airline_retail_telecom
+  models:
+    - gpt-5.4
+    - opus-4.7
+  native:
+    evaluation_mode: native_end_to_end
+    context_budget_profile: native_default
+    algorithm_param_profile: paper_default
+  budget_matched:
+    evaluation_mode: budget_matched
+    context_budget_profile: matched_v1
+    supplemental_cells_reserved: true

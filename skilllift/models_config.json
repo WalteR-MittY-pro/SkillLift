@@ -1,0 +1,24 @@
+{
+  "moduleModels": {
+    "skill_generator": "${GPT_MODEL}",
+    "rubricator": "${GPT_MODEL}",
+    "verifier": "${GPT_MODEL}"
+  },
+  "runtime": {
+    "llm_timeout_seconds": 600,
+    "llm_max_retries": 1
+  },
+  "providers": {
+    "openai": {
+      "baseUrl": "${GPT_BASE_URL}",
+      "apiKey": "${GPT_API_KEY}",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "${GPT_MODEL}",
+          "name": "openai/${GPT_MODEL}"
+        }
+      ]
+    }
+  }
+}

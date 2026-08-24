@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use SkillLift in your research, please cite it using the metadata below."
+title: "SkillLift"
+type: software
+license: MIT
+abstract: "SkillLift is an evaluation framework for self-evolving agent skills. It runs the SkillLift portfolio coordinator (Mode A verifier-guided refinement, Mode B oracle-aligned rubric revision) and reproduction baselines against the WildClawBench, tau2-bench, and SkillsBench benchmarks under matched context and token budgets."
+repository-code: "https://github.com/WalteR-MittY-pro/SkillLift"
+url: "https://github.com/WalteR-MittY-pro/SkillLift"
+keywords:
+  - AI agents
+  - agent skills
+  - self-evolving skills
+  - benchmark evaluation
+  - LLM agents
+authors:
+  - family-names: "Kang"
+    given-names: "Haoxiang"
+  - family-names: "Wen"
+    given-names: "Ming"
