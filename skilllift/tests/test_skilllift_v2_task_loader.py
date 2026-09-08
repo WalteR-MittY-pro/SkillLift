@@ -63,16 +63,19 @@ def test_numeric_id_with_leading_zeros_is_preserved(tmp_path) -> None:
     assert "id: 00123__skilllift_s001_v001" in rewritten.read_text(encoding="utf-8")
 
 
-def test_short_id_and_repo_skill_lookup_for_real_task() -> None:
-    root = Path(__file__).resolve().parents[2]
-    task = load_task_spec(
-        root
-        / "WildClawBench"
-        / "tasks"
-        / "03_Social_Interaction"
-        / "03_Social_Interaction_task_2_chat_action_extraction.md"
-    )
+def test_repo_skill_lookup_long_and_short_id(tmp_path, monkeypatch) -> None:
+    task = load_task_spec(_task(tmp_path / "task.md"))
     assert extract_task_short_id(task.task_name) == "03_task2"
-    path = find_repo_skill_markdown(task)
-    assert path is not None
-    assert path.exists()
+    monkeypatch.chdir(tmp_path)
+    short_dir = tmp_path / "skills" / "03_task2"
+    short_dir.mkdir(parents=True)
+    (short_dir / "SKILL.md").write_text("---\nname: 03_task2\n---\nshort\n", encoding="utf-8")
+    assert find_repo_skill_markdown(task) == Path("skills") / "03_task2" / "SKILL.md"
+    long_dir = tmp_path / "skills" / task.task_name
+    long_dir.mkdir(parents=True)
+    (long_dir / "SKILL.md").write_text("---\nname: long\n---\nlong\n", encoding="utf-8")
+    assert find_repo_skill_markdown(task) == Path("skills") / task.task_name / "SKILL.md"
+    empty_cwd = tmp_path / "elsewhere"
+    empty_cwd.mkdir()
+    monkeypatch.chdir(empty_cwd)
+    assert find_repo_skill_markdown(task) is None
