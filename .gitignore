@@ -15,10 +15,7 @@ __pycache__/
 .idea/
 .vscode/
 
-# run outputs (A0 contracts under runs/task_0_2_to_0_5 are tracked)
 runs/*
-!runs/task_0_2_to_0_5/
-!runs/task_0_2_to_0_5/**
 
 # local-only benchmark checkout (unfinished experiment, not distributed)
 tau2-bench/

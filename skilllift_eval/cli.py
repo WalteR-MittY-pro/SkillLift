@@ -53,12 +53,6 @@ BENCHMARKS = ["wildclawbench", "tau2"]
 EVALUATION_MODES = ["native_end_to_end", "budget_matched"]
 TAU2_ALLOWED_DOMAINS = ["airline", "retail", "telecom"]
 TAU2_DEFAULT_SPLIT = "base"
-A0_CONTRACT_REFS = {
-    "repo_state": "runs/task_0_2_to_0_5/repo_state.json",
-    "external_contracts": "runs/task_0_2_to_0_5/external_contracts.json",
-    "baseline_cli_contract": "runs/task_0_2_to_0_5/baseline_cli_contract.json",
-    "context_budget_contract": "runs/task_0_2_to_0_5/context_budget_contract.json",
-}
 
 
 @dataclass(frozen=True)
@@ -460,15 +454,6 @@ def apply_algorithm_override(profile: AlgorithmParamProfile, override_path: Path
     return profile.with_overrides(overrides)
 
 
-def load_a0_contracts(root: Path) -> dict[str, str]:
-    for rel in A0_CONTRACT_REFS.values():
-        path = root / rel
-        if not path.exists():
-            raise ValueError(f"missing A0 contract {rel}")
-        json.loads(path.read_text(encoding="utf-8"))
-    return A0_CONTRACT_REFS.copy()
-
-
 def handle_run(args: Any) -> int:
     baseline = canonical_baseline(args.baseline, include_no_skill=True)
     if args.tasks_mode == "single" and not args.tasks_filter:
@@ -493,7 +478,6 @@ def handle_run(args: Any) -> int:
     endpoints = resolve_endpoints(config, [args.model])
     endpoint = endpoints[args.model]
     profile = resolve_run_profile(root, baseline, args)
-    a0_refs = load_a0_contracts(root)
     key = MatrixCellKey(args.evaluation_mode, baseline, args.benchmark, args.model)
     run_config = {
         "baseline_input": args.baseline,
@@ -522,7 +506,6 @@ def handle_run(args: Any) -> int:
         "algorithm_override_diff_path": None,
         "tasks": {"mode": args.tasks_mode, "filter": args.tasks_filter, "checkpoint": args.tasks_checkpoint},
         "tau2": {"domains": tau2_domains, "split": tau2_split} if args.benchmark == "tau2" else None,
-        "a0_contract_refs": a0_refs,
     }
     if baseline == "skilllift" and args.benchmark == "wildclawbench" and args.tasks_mode == "single":
         run_config["task_sample_policy_id"] = SKILLLIFT_WILDCLAW_TASK_SAMPLE_POLICY_ID

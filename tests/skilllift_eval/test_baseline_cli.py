@@ -51,12 +51,6 @@ def test_run_dry_run_normalizes_baseline_alias_and_writes_standalone_config() ->
     assert config["baseline_input"] == "autoskills"
     assert config["tasks"]["mode"] == "single"
     assert config["tasks"]["filter"] == "task-1"
-    assert config["a0_contract_refs"] == {
-        "repo_state": "runs/task_0_2_to_0_5/repo_state.json",
-        "external_contracts": "runs/task_0_2_to_0_5/external_contracts.json",
-        "baseline_cli_contract": "runs/task_0_2_to_0_5/baseline_cli_contract.json",
-        "context_budget_contract": "runs/task_0_2_to_0_5/context_budget_contract.json",
-    }
     encoded = json.dumps(config)
     assert '"api_key"' not in encoded
     assert "literal-secret-for-test" not in encoded
