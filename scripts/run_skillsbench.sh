@@ -143,7 +143,7 @@ for selected_model in "${selected_models[@]}"; do
             run_root="${run_base}/${baseline}/${selected_model}/${selected_domain}"
         fi
         command=(
-            "${PYTHON}" scripts/skilllift_skillsbench_tasks.py
+            "${PYTHON}" scripts/skillsbench_tasks.py
             --baseline "${baseline}"
             --model "${selected_model}"
             --domain "${selected_domain}"

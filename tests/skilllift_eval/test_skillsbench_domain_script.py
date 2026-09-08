@@ -7,7 +7,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "skilllift_skillsbench_domain.sh"
+SCRIPT = ROOT / "scripts" / "skillsbench_domain.sh"
 DOMAINS = (
     "cybersecurity",
     "finance-economics",
@@ -36,7 +36,7 @@ def test_domain_script_exposes_category_phase_and_run_root_contract() -> None:
 
 def test_each_domain_has_a_launcher_and_dedicated_config() -> None:
     for domain in DOMAINS:
-        script = ROOT / "scripts" / "skilllift_skillsbench_domains" / f"{domain}.sh"
+        script = ROOT / "scripts" / "skillsbench_domains" / f"{domain}.sh"
         config_path = ROOT / "configs" / "skillsbench" / "domains" / f"{domain}.yaml"
 
         completed = subprocess.run(

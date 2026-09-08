@@ -8,7 +8,7 @@ CONFIG="${SKILLLIFT_SKILLSBENCH_CONFIG:-${ROOT}/configs/skillsbench/tasks.yaml}"
 usage() {
     cat <<'EOF'
 Usage:
-  scripts/skilllift_skillsbench_domain.sh <category|all> <check|train|test> <run-root> [extra CLI arguments]
+  scripts/skillsbench_domain.sh <category|all> <check|train|test> <run-root> [extra CLI arguments]
 
 Categories:
   cybersecurity
@@ -59,7 +59,7 @@ case "${category}" in
         ;;
 esac
 
-exec "${ROOT}/scripts/skilllift_skillsbench_run.sh" \
+exec "${ROOT}/scripts/skillsbench_run.sh" \
     --config "${CONFIG}" \
     --categories "${category}" \
     --phase "${phase}" \

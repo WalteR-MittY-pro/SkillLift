@@ -21,4 +21,4 @@ if [[ -z "${SSL_CERT_FILE:-}" ]]; then
     export SSL_CERT_FILE="$("${PYTHON}" -m certifi)"
 fi
 
-exec "${PYTHON}" scripts/skilllift_skillsbench_run.py "$@"
+exec "${PYTHON}" scripts/skillsbench_run.py "$@"

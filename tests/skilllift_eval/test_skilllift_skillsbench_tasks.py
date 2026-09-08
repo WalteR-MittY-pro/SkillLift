@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-import scripts.skilllift_skillsbench_tasks as skillsbench_script
+import scripts.skillsbench_tasks as skillsbench_script
 import skilllift_eval.runners.skilllift_skillsbench_tasks as skillsbench_runner
-from scripts.skilllift_skillsbench_tasks import _settings, parse_args
+from scripts.skillsbench_tasks import _settings, parse_args
 from skilllift_eval.runners.skilllift_skillsbench_tasks import (
     _benchflow_runtime_hash,
     _git_worktree_hash,

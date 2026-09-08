@@ -279,7 +279,7 @@ def experiment_config_hash(
     source_paths = tuple(sorted((settings.project_root / "skilllift" / "skilllift").rglob("*.py")))
     source_paths += tuple(sorted((settings.project_root / "skilllift_eval").rglob("*.py")))
     source_paths += (
-        settings.project_root / "scripts" / "skilllift_skillsbench_tasks.py",
+        settings.project_root / "scripts" / "skillsbench_tasks.py",
         settings.patch_source,
     )
     return _stable_hash(

@@ -11,7 +11,7 @@ import yaml
 from skilllift.portfolio import PortfolioRef
 from skilllift.coordinator import CandidateEvaluation, TrialSpec
 from skilllift.schemas import SkillLiftConfig, EvoSkill, SkillKey, TaskSpec
-from scripts.skilllift_skillsbench_tasks import _write_evolution_manifest, parse_args
+from scripts.skillsbench_tasks import _write_evolution_manifest, parse_args
 from skilllift_eval.runners.coevoskills_skillsbench import (
     CoEvoSkillsSkillsBenchRunner,
     _ArtifactBackend,
