@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "description": "Overall pass-rate (%) results for SkillLift and baselines on WildClawBench (60 tasks) and SkillsBench (87 tasks), 3 rollout seeds, mean per-task best evolved-skill score. Evolving baselines share the same seed skills and receive 2x SkillLift's token budget.",
+    "wildclawbench_model_note": "WildClawBench uses GPT-5.4 and SkillsBench uses GPT-5.4-mini, aligning with the official implementations.",
+    "metrics": "pass rate (%)"
+  },
+  "methods": [
+    "No skill",
+    "+ Human-written",
+    "+ LLM-written",
+    "+ SkillOpt",
+    "+ CoEvoSkills",
+    "+ SkillLift (ours)"
+  ],
+  "main_results": {
+    "WildClawBench": {
+      "GPT-5.4":       [50.3, 56.9, 55.7, 64.3, 62.2, 68.4],
+      "GLM-5.1":       [48.1, 55.2, 52.2, 62.0, 55.9, 66.5],
+      "DeepSeek-V4-Pro": [44.4, 53.6, 48.3, 59.5, 54.7, 62.4]
+    },
+    "SkillsBench": {
+      "GPT-5.4-mini":  [29.9, 41.4, 39.5, 58.2, 52.5, 62.5],
+      "GLM-5.1":       [32.7, 58.4, 57.5, 70.5, 66.6, 75.1],
+      "DeepSeek-V4-Pro": [26.9, 50.1, 47.9, 69.0, 66.3, 74.3]
+    }
+  },
+  "token_efficiency": {
+    "description": "Average cumulative tokens required to first reach the 0.9 quantile of total pass-rate score on SkillsBench, expressed as a multiple of SkillLift's cost (SkillLift = 1.0x).",
+    "models": ["GPT-5.4-mini", "GLM-5.1", "DeepSeek-V4"],
+    "SkillOpt":     [2.74, 2.22, 2.62],
+    "CoEvoSkills":  [2.68, 2.17, 2.13]
+  },
+  "ablation": {
+    "description": "Ablation on SkillsBench (overall pass rate, %).",
+    "variants": ["w/o rubricator", "w/o seed skills", "w/ score regression", "SkillLift (full)"],
+    "models": ["GPT-5.4-mini", "GLM-5.1", "DeepSeek-V4"],
+    "GPT-5.4-mini": [42.5, 57.5, 59.8, 62.5],
+    "GLM-5.1":      [59.8, 71.3, 72.4, 75.1],
+    "DeepSeek-V4":  [65.5, 67.8, 69.0, 74.3]
+  }
+}

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748B"/>
+    </marker>
+    <marker id="arwRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#E64B35"/>
+    </marker>
+  </defs>
+
+  <!-- panels -->
+  <rect x="25" y="35" width="620" height="485" rx="14" fill="#F4F6FA" stroke="#C8CFDA" stroke-width="1.5"/>
+  <rect x="735" y="35" width="400" height="485" rx="14" fill="#F4F6FA" stroke="#C8CFDA" stroke-width="1.5"/>
+
+  <!-- panel titles -->
+  <text x="335" y="72" text-anchor="middle" font-size="20" font-weight="bold" fill="#1F2A44">Inner loop · Mode A</text>
+  <text x="335" y="94" text-anchor="middle" font-size="14" fill="#6B7280">zero oracle cost</text>
+  <text x="935" y="72" text-anchor="middle" font-size="20" font-weight="bold" fill="#1F2A44">Outer loop · Mode B</text>
+  <text x="935" y="94" text-anchor="middle" font-size="14" fill="#6B7280">K+1 oracle rollouts per round</text>
+
+  <!-- Mode A nodes -->
+  <rect x="75" y="120" width="270" height="70" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.4"/>
+  <text x="210" y="149" text-anchor="middle" font-size="17" font-weight="bold" fill="#1F2A44">Rubric R</text>
+  <text x="210" y="171" text-anchor="middle" font-size="13.5" fill="#475569">M binary criteria, signed weights</text>
+
+  <rect x="230" y="240" width="270" height="70" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.4"/>
+  <text x="365" y="269" text-anchor="middle" font-size="17" font-weight="bold" fill="#1F2A44">Verifier</text>
+  <text x="365" y="291" text-anchor="middle" font-size="13.5" fill="#475569">scores each skill — 1 LLM call, criterion hits</text>
+
+  <rect x="75" y="360" width="270" height="70" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.4"/>
+  <text x="210" y="389" text-anchor="middle" font-size="17" font-weight="bold" fill="#1F2A44">Generator</text>
+  <text x="210" y="411" text-anchor="middle" font-size="13.5" fill="#475569">derives K branches from feedback</text>
+
+  <rect x="250" y="440" width="230" height="60" rx="10" fill="#FDF3F1" stroke="#E64B35" stroke-width="1.4"/>
+  <text x="365" y="465" text-anchor="middle" font-size="14.5" font-weight="bold" fill="#7F1D1D">Accept only if rubric score</text>
+  <text x="365" y="485" text-anchor="middle" font-size="14.5" font-weight="bold" fill="#7F1D1D">does not decrease</text>
+
+  <!-- Mode A arrows -->
+  <line x1="210" y1="190" x2="330" y2="236" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <line x1="365" y1="310" x2="248" y2="356" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <line x1="210" y1="430" x2="246" y2="452" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <line x1="365" y1="440" x2="365" y2="314" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <text x="377" y="382" font-size="12.5" font-style="italic" fill="#6B7280">accept, else discard</text>
+
+  <!-- Mode B nodes -->
+  <rect x="785" y="120" width="300" height="70" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.4"/>
+  <text x="935" y="149" text-anchor="middle" font-size="17" font-weight="bold" fill="#1F2A44">Oracle</text>
+  <text x="935" y="171" text-anchor="middle" font-size="13.5" fill="#475569">ranks K+1 skills — full rollouts</text>
+
+  <polygon points="935,240 1045,272 935,304 825,272" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.4"/>
+  <text x="935" y="278" text-anchor="middle" font-size="15.5" font-weight="bold" fill="#1F2A44">Kendall &#964; &#8805; 0.9 ?</text>
+
+  <rect x="785" y="360" width="300" height="70" rx="10" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.4"/>
+  <text x="935" y="389" text-anchor="middle" font-size="17" font-weight="bold" fill="#1F2A44">Rubricator</text>
+  <text x="935" y="411" text-anchor="middle" font-size="13.5" fill="#475569">revises R from ranking disagreement</text>
+
+  <!-- Mode B arrows -->
+  <line x1="935" y1="190" x2="935" y2="236" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <line x1="935" y1="304" x2="935" y2="356" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <text x="947" y="334" font-size="12.5" font-style="italic" fill="#6B7280">no</text>
+  <path d="M 1085 395 L 1112 395 L 1112 155 L 1089 155" fill="none" stroke="#64748B" stroke-width="1.8" marker-end="url(#arw)"/>
+  <text x="1096" y="280" font-size="12.5" font-style="italic" fill="#6B7280" transform="rotate(-90 1096 280)">re-rank</text>
+
+  <!-- cross-panel arrows -->
+  <path d="M 480 470 L 702 470 L 702 172 L 781 172" fill="none" stroke="#E64B35" stroke-width="2.2" marker-end="url(#arwRed)"/>
+  <text x="588" y="459" text-anchor="middle" font-size="12.5" font-style="italic" fill="#E64B35">refined branches</text>
+  <path d="M 785 395 L 722 395 L 722 155 L 349 155" fill="none" stroke="#E64B35" stroke-width="2.2" marker-end="url(#arwRed)"/>
+  <text x="536" y="143" text-anchor="middle" font-size="12.5" font-style="italic" fill="#E64B35">re-aligned rubric</text>
+</svg>
