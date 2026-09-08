@@ -111,12 +111,14 @@ class FakeAdapter:
         terminal: float = 1.0,
         final_rewards=(0.4, 0.6),
         fail_first_attempt: bool = False,
+        fail_until_attempt: int = 0,
         crash_candidate: str | None = None,
     ) -> None:
         self.seed = seed
         self.terminal = terminal
         self.final_rewards = final_rewards
         self.fail_first_attempt = fail_first_attempt
+        self.fail_until_attempt = fail_until_attempt
         self.crash_candidate = crash_candidate
         self.calls: list[tuple[TrialSpec, str]] = []
         self.recover_calls: list[str] = []
@@ -143,6 +145,8 @@ class FakeAdapter:
         ):
             raise RuntimeError("simulated process death")
         if self.fail_first_attempt and trial.attempt == 0:
+            return CandidateEvaluation.infrastructure_failure("transient")
+        if self.fail_until_attempt and trial.attempt < self.fail_until_attempt:
             return CandidateEvaluation.infrastructure_failure("transient")
         reward = self.final_rewards[trial.final_index] if trial.phase == "final" else _score(portfolio)
         return CandidateEvaluation.valid(reward, result_hash=f"result-{trial.trial_id}")
@@ -262,6 +266,61 @@ def test_each_logical_cell_allows_only_one_infrastructure_retry(tmp_path: Path) 
     assert result.physical_attempts == 24
     by_cell = Counter((trial.phase, trial.round_index, trial.candidate_id, trial.final_index) for trial, _ in adapter.calls)
     assert set(by_cell.values()) == {2}
+
+
+def _anchor_cell(coordinator: TaskPortfolioCoordinator, seed: PortfolioRef):
+    return coordinator._evaluate_cell(
+        "task-1", seed, RewardSpec(terminal_threshold=1.0), "hash-x", phase="anchor"
+    )
+
+
+def test_infra_failure_does_not_consume_budget_and_retry_reaches_third_attempt(
+    tmp_path: Path,
+) -> None:
+    seed = _seed(tmp_path)
+    adapter = FakeAdapter(seed, terminal=9.0, fail_until_attempt=2)
+    coordinator = _coordinator(
+        tmp_path, adapter, FakePlanner(raise_on_call=True), FakeGenerator(raise_on_call=True), max_rounds=1
+    )
+
+    evaluation = _anchor_cell(coordinator, seed)
+
+    assert evaluation.is_valid
+    # Two infrastructure failures did not end the cell: it retried to a
+    # third physical attempt, which the old two-attempt budget forbade.
+    assert [trial.attempt for trial, _ in adapter.calls] == [0, 1, 2]
+
+
+def test_fuse_trips_after_three_consecutive_infra_failures_and_cell_stays_retryable(
+    tmp_path: Path,
+) -> None:
+    seed = _seed(tmp_path)
+    adapter = FakeAdapter(seed, terminal=9.0, fail_until_attempt=99)
+    coordinator = _coordinator(
+        tmp_path, adapter, FakePlanner(raise_on_call=True), FakeGenerator(raise_on_call=True), max_rounds=1
+    )
+
+    evaluation = _anchor_cell(coordinator, seed)
+
+    assert not evaluation.is_valid
+    assert [trial.attempt for trial, _ in adapter.calls] == [0, 1, 2]
+    task_root = coordinator.store.task_root("task-1")
+    assert len(list(task_root.rglob("attempt-*.json"))) == 3
+    # The fuse outcome is not persisted as the cell's final result, so a
+    # later resume (after the outage is fixed) retries with a fresh fuse.
+    assert not list(task_root.rglob("result_ref.json"))
+
+    recovered = _anchor_cell(
+        _coordinator(
+            tmp_path,
+            FakeAdapter(seed, terminal=9.0),
+            FakePlanner(raise_on_call=True),
+            FakeGenerator(raise_on_call=True),
+            max_rounds=1,
+        ),
+        seed,
+    )
+    assert recovered.is_valid
 
 
 def test_resume_reuses_plan_patches_and_completed_candidate(tmp_path: Path) -> None:

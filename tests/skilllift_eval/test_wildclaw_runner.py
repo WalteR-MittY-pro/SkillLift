@@ -5,7 +5,12 @@ from pathlib import Path
 
 from skilllift_eval.cli import handle_audit, write_json
 from skilllift_eval.model_endpoints import ModelEndpointProfile, endpoint_config_hash
-from skilllift_eval.runners.wildclaw import WildClawArtifactRunner, WildClawRunSettings, WildClawRunner
+from skilllift_eval.runners.wildclaw import (
+    WildClawArtifactRunner,
+    WildClawRunSettings,
+    WildClawRunner,
+    _score_payload,
+)
 from skilllift_eval.schemas import SkillBundle, stable_hash
 
 
@@ -96,6 +101,41 @@ def skilllift_bundle() -> SkillBundle:
         ],
         created_at="2026-06-26T00:00:00Z",
     )
+
+
+def test_score_payload_distinguishes_failure_from_real_zero() -> None:
+    # Engine error → null score with the engine's reason, never a 0.0.
+    failed = _score_payload({"error": "docker cp failed: no such container", "scores": {}, "usage": {}})
+    assert failed["status"] == "failed"
+    assert failed["score"] is None
+    assert failed["overall_score"] is None
+    assert "docker cp failed" in failed["error_summary"]
+
+    # Grading produced no parseable score → failed with an explicit reason
+    # instead of a silently fabricated 0.0 marked as succeeded.
+    missing = _score_payload({"scores": {}, "usage": {}})
+    assert missing["status"] == "failed"
+    assert missing["score"] is None
+    assert "overall_score" in missing["error_summary"]
+
+    # Non-numeric garbage is rejected rather than coerced (numeric strings
+    # like "0.9" coerce cleanly and are accepted).
+    bad = _score_payload({"scores": {"overall_score": "not-a-number"}, "usage": {}})
+    assert bad["status"] == "failed"
+    assert bad["score"] is None
+    coerced = _score_payload({"scores": {"overall_score": "0.9"}, "usage": {}})
+    assert coerced["status"] == "succeeded"
+    assert coerced["score"] == 0.9
+
+    # A genuine zero from the grader stays a succeeded zero.
+    zero = _score_payload({"scores": {"overall_score": 0.0}, "usage": {}})
+    assert zero["status"] == "succeeded"
+    assert zero["score"] == 0.0
+
+    # Happy path unchanged.
+    ok = _score_payload({"scores": {"overall_score": 0.75}, "usage": {}})
+    assert ok["status"] == "succeeded"
+    assert ok["score"] == 0.75
 
 
 def test_wildclaw_runner_runs_single_skilllift_task_and_writes_artifacts(tmp_path: Path) -> None:

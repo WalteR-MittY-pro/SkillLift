@@ -50,6 +50,19 @@ def test_reference_material_loads_initial_skill(tmp_path) -> None:
     assert "name: demo" in reference
 
 
+def test_numeric_id_with_leading_zeros_is_preserved(tmp_path) -> None:
+    path = tmp_path / "task.md"
+    path.write_text(
+        "---\nid: 00123\ntimeout_seconds: 300\n---\n\n## Prompt\n\nDo this.\n",
+        encoding="utf-8",
+    )
+    task = load_task_spec(path)
+    assert task.task_name == "00123"
+    skill = EvoSkill(SkillKey(1, 1), "demo", {"SKILL.md": "x\n", "a.py": "print(1)\n"}, "a.py")
+    rewritten = rewrite_task_id_for_skill(path, skill, tmp_path / "out")
+    assert "id: 00123__skilllift_s001_v001" in rewritten.read_text(encoding="utf-8")
+
+
 def test_short_id_and_repo_skill_lookup_for_real_task() -> None:
     root = Path(__file__).resolve().parents[2]
     task = load_task_spec(

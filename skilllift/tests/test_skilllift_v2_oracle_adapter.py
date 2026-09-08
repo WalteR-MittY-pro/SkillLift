@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -276,3 +277,34 @@ def test_failure_stage_classification() -> None:
     assert classify_oracle_failure_stage(0, None, OracleFeedback()) == "output_resolution"
     assert classify_oracle_failure_stage(0, Path("/tmp/out"), OracleFeedback(metadata={"failure_type": "task_low_score"})) == "task_low_score"
     assert classify_oracle_failure_stage(0, Path("/tmp/out"), OracleFeedback(metadata={"failure_type": "success"})) == "success"
+
+
+def test_failure_stage_classification_does_not_override_passing_grader_score() -> None:
+    passing = OracleFeedback(metadata={"failure_type": "success"})
+    # Healthy runs echo config like "timeout=3600"; a passing score must win.
+    assert classify_oracle_failure_stage(
+        0, Path("/tmp/out"), passing, stdout="agent config timeout=3600"
+    ) == "success"
+    # Numeric access codes need word boundaries: "1401ms" must not match 401.
+    assert classify_oracle_failure_stage(
+        0, Path("/tmp/out"), OracleFeedback(), stdout="elapsed=1401ms"
+    ) == "success"
+    # A genuine 401 is still detected.
+    assert classify_oracle_failure_stage(
+        0, Path("/tmp/out"), OracleFeedback(), stdout="HTTP 401 Unauthorized"
+    ) == "llm_access_failure"
+    # Keyword refinement still refines non-passing runs.
+    low = OracleFeedback(metadata={"failure_type": "task_low_score"})
+    assert classify_oracle_failure_stage(
+        0, Path("/tmp/out"), low, stdout="request timed out"
+    ) == "llm_or_agent_timeout"
+
+
+def test_oracle_cache_key_covers_timeout_and_feedback_level(tmp_path) -> None:
+    task = _task(tmp_path / "task.md")
+    skill = _skill()
+    base = build_oracle_cache_key(task, skill, SkillLiftConfig())
+    longer_timeout = replace(SkillLiftConfig(), agent_timeout_override=3600)
+    higher_feedback = replace(SkillLiftConfig(), oracle_feedback_level=3)
+    assert build_oracle_cache_key(task, skill, longer_timeout) != base
+    assert build_oracle_cache_key(task, skill, higher_feedback) != base

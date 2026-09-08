@@ -107,9 +107,13 @@ def sanitize_scores(payload: dict[str, Any]) -> dict[str, float]:
 
 
 def classify_failure_from_payload(scores: dict[str, Any], logs: str, missing_score: bool = False) -> str:
-    combined = f"{json.dumps(scores, ensure_ascii=False)}\n{logs}".lower()
     if missing_score:
         return "grader_missing_score"
+    if float(scores.get("overall_score", 0.0) or 0.0) >= 1.0:
+        # A perfect grader score is authoritative: the word "error" shows up
+        # in healthy agent transcripts and must not reclassify the run.
+        return "success"
+    combined = f"{json.dumps(scores, ensure_ascii=False)}\n{logs}".lower()
     if "docker" in combined and ("failed" in combined or "cannot connect" in combined):
         return "container_start"
     if "skill" in combined and ("not found" in combined or "load" in combined or "missing" in combined):

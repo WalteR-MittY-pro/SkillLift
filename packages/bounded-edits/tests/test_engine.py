@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import subprocess
+from dataclasses import replace
 
 import pytest
 import bounded_edits.engine as engine_module
@@ -137,6 +138,38 @@ def test_line_id_range_rejects_same_line_boundary(tmp_path):
             source=b"one\ntwo\n",
         )
     assert raised.value.code is ErrorCode.INVALID_RANGE
+
+
+def test_directly_constructed_string_op_does_not_degrade_to_delete(tmp_path):
+    (tmp_path / "skill.md").write_bytes(BASE.encode())
+    snapshot = capture_snapshot(tmp_path, ["skill.md"])
+    contract = build_contract(snapshot)
+    parsed = parse_response(
+        _raw_edit(
+            "replace_range",
+            start_anchor="one\n",
+            end_anchor="## Beta\n",
+            content="replacement\n",
+        ),
+        contract=contract,
+    )
+    # Simulate a caller that bypasses parse_response and carries a plain
+    # string op (EditOp is a StrEnum, so the string equals the enum value).
+    string_op = replace(parsed.batch.edits[0], op="replace_range")
+    parsed = replace(parsed, batch=replace(parsed.batch, edits=(string_op,)))
+
+    # Unknown ops fail closed before any disk mutation.
+    bogus = replace(parsed.batch.edits[0], op="bogus")
+    with pytest.raises(BoundedEditError) as raised:
+        prepare_patch(
+            snapshot=snapshot,
+            parsed=replace(parsed, batch=replace(parsed.batch, edits=(bogus,))),
+        )
+    assert raised.value.code is ErrorCode.INVALID_OPERATION
+
+    prepared = prepare_patch(snapshot=snapshot, parsed=parsed)
+    _apply(tmp_path, prepared.unified_diff)
+    assert (tmp_path / "skill.md").read_text() == "## Alpha\nreplacement\n## Beta\ntwo\n"
 
 
 @pytest.mark.parametrize(

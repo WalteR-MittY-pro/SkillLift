@@ -130,6 +130,11 @@ def _parse_frontmatter_value(value: str) -> Any:
     if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         return value[1:-1]
     if re.fullmatch(r"-?\d+", value):
+        digits = value.lstrip("-")
+        if len(digits) > 1 and digits.startswith("0"):
+            # Preserve leading zeros ("00123"): int() would silently drop
+            # them and corrupt task ids on the rewrite round-trip.
+            return value
         return int(value)
     if value.lower() == "true":
         return True

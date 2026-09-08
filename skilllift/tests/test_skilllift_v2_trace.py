@@ -1,6 +1,16 @@
 import json
 
-from skilllift.experiment_trace import load_public_score, redact, summarize_oracle_output
+from skilllift.experiment_trace import (
+    classify_failure_from_payload,
+    load_public_score,
+    redact,
+    summarize_oracle_output,
+)
+
+
+def test_classify_failure_from_payload_protects_perfect_score() -> None:
+    # The word "error" is routine log noise; a perfect grader score wins.
+    assert classify_failure_from_payload({"overall_score": 1.0}, "RuntimeError: error") == "success"
 
 
 def test_redact_masks_secrets_and_hidden_answers() -> None:

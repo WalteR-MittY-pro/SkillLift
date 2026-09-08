@@ -1,5 +1,7 @@
 import json
 import http.client
+import io
+import urllib.error
 
 import pytest
 
@@ -324,6 +326,48 @@ def test_llm_client_does_not_sleep_for_non_framework_role(monkeypatch) -> None:
 
     assert client.call_text("system", "user") == "ok"
     assert events == ["urlopen"]
+
+
+def test_llm_client_stream_requests_usage_and_survives_rejection(monkeypatch) -> None:
+    payloads = []
+
+    class FakeResponse:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, size=-1):
+            return self._body
+
+    def fake_urlopen(request, timeout, **kwargs):
+        payloads.append(json.loads(request.data))
+        if len(payloads) == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                400,
+                "Bad Request",
+                {},
+                io.BytesIO(b'{"error":{"message":"stream_options is not supported"}}'),
+            )
+        return FakeResponse(
+            b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+            b'data: {"usage":{"total_tokens":7,"prompt_tokens":5,"completion_tokens":2}}\n\n'
+            b"data: [DONE]\n\n"
+        )
+
+    monkeypatch.setattr("skilllift.llm_client.urllib.request.urlopen", fake_urlopen)
+    client = LLMClient("https://example.test/v1", "token", "model", use_stream=True, max_retries=0)
+
+    assert client.call_text("system", "user") == "ok"
+    assert payloads[0]["stream_options"] == {"include_usage": True}
+    assert "stream_options" not in payloads[1]
+    assert payloads[1]["stream"] is True
+    assert client.total_tokens == 7
 
 
 def test_llm_client_transports_optional_structured_output_fields(monkeypatch) -> None:

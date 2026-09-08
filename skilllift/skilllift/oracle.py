@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,7 +19,7 @@ from .adapters.wildclawbench import (
 )
 from .errors import OracleAdapterError
 from .experiment_trace import load_public_score, summarize_oracle_output
-from .persistence import ExperimentStore, read_json, write_json
+from .persistence import ExperimentStore, read_json, write_json, write_json_atomic
 from .ranking import assign_tie_aware_ranks, rank_oracle_scores
 from .schemas import SkillLiftConfig, EvoSkill, OracleFeedback, OracleScore, SkillKey, TaskSpec
 from .baselines.skill_package import evo_skill_to_runtime_dir
@@ -138,14 +139,24 @@ def load_oracle_score(output_dir: Path, skill: SkillKey, threshold: float, feedb
     return OracleScore(skill, oracle_score, oracle_pass, feedback=feedback, output_dir=str(output_dir))
 
 
+# Bump when scoring or feedback semantics change so stale cache entries
+# written by an older logic version stop matching.
+ORACLE_SCORING_VERSION = 1
+
+
 def build_oracle_cache_key(task: TaskSpec, skill: EvoSkill, config: SkillLiftConfig) -> str:
     openclaw_models_config = config.openclaw_models_config_path()
     payload = {
+        "scoring_version": ORACLE_SCORING_VERSION,
         "task": task.task_name,
         "model": config.model,
         "openclaw_models_config_hash": compute_models_config_hash(openclaw_models_config),
         "skill_package_hash": compute_skill_package_hash(skill),
         "oracle_threshold": config.oracle_threshold,
+        # Both of these change the measured result or the cached feedback
+        # text; leaving them out returned stale scores after overrides.
+        "agent_timeout_override": int(config.agent_timeout_override),
+        "oracle_feedback_level": int(config.oracle_feedback_level),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -158,7 +169,7 @@ def load_cached_oracle_score(cache_key: str, store: ExperimentStore) -> OracleSc
 
 
 def save_cached_oracle_score(cache_key: str, score: OracleScore, store: ExperimentStore) -> None:
-    write_json(store.exp_dir / "oracle_cache" / f"{cache_key}.json", score)
+    write_json_atomic(store.exp_dir / "oracle_cache" / f"{cache_key}.json", score)
 
 
 def write_oracle_run_manifest(manifest: dict[str, Any], store: ExperimentStore) -> Path:
@@ -176,6 +187,13 @@ def classify_oracle_failure_stage(
     stdout: str = "",
     stderr: str = "",
 ) -> str:
+    if returncode != 0:
+        return "run_batch_process"
+    if str(feedback.metadata.get("failure_type") or "") == "success":
+        # The grader already produced a passing score. Keyword hits in agent
+        # logs must not override it: config echoes like "timeout=3600" or
+        # "api_key_env=GLM_API_KEY" show up in perfectly healthy runs.
+        return "success"
     combined = f"{stdout}\n{stderr}\n{feedback.summary}\n{feedback.stderr_excerpt}".lower()
     if contains_rate_limit_signal(combined):
         return "llm_rate_limited"
@@ -183,8 +201,6 @@ def classify_oracle_failure_stage(
         return "llm_or_agent_timeout"
     if _contains_llm_access_signal(combined):
         return "llm_access_failure"
-    if returncode != 0:
-        return "run_batch_process"
     if output_dir is None:
         return "output_resolution"
     failure = str(feedback.metadata.get("failure_type") or "")
@@ -199,12 +215,15 @@ def _contains_timeout_signal(text: str) -> bool:
     return any(token in text for token in ["timeout", "timed out", "read timed out", "deadline exceeded"])
 
 
+_HTTP_ACCESS_CODE_RE = re.compile(r"\b(?:401|403)\b")
+
+
 def _contains_llm_access_signal(text: str) -> bool:
+    if _HTTP_ACCESS_CODE_RE.search(text):
+        return True
     return any(
         token in text
         for token in [
-            "401",
-            "403",
             "unauthorized",
             "forbidden",
             "invalid api key",

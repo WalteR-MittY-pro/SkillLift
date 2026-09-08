@@ -64,14 +64,14 @@ def prepare_patch(
 
 def _resolve_edit(text: str, edit: WireEdit, index: int) -> _ResolvedEdit:
     content = normalize_newlines(edit.content)
-    if edit.op is EditOp.APPEND:
+    if edit.op == EditOp.APPEND:
         return _ResolvedEdit(index, edit.file_id, len(text), len(text), content)
 
     start_anchor = normalize_newlines(edit.start_anchor or "")
     start_offset = _resolve_position(text, start_anchor, index, edit.file_id)
-    if edit.op is EditOp.INSERT_BEFORE:
+    if edit.op == EditOp.INSERT_BEFORE:
         return _ResolvedEdit(index, edit.file_id, start_offset, start_offset, content)
-    if edit.op is EditOp.INSERT_AFTER:
+    if edit.op == EditOp.INSERT_AFTER:
         offset = _line_end(text, start_anchor, start_offset)
         return _ResolvedEdit(index, edit.file_id, offset, offset, content)
 
@@ -87,7 +87,17 @@ def _resolve_edit(text: str, edit: WireEdit, index: int) -> _ResolvedEdit:
             ErrorCode.INVALID_RANGE, edit_index=index, file_id=edit.file_id
         )
     end = end_offset
-    replacement = content if edit.op is EditOp.REPLACE_RANGE else ""
+    if edit.op == EditOp.REPLACE_RANGE:
+        replacement = content
+    elif edit.op == EditOp.DELETE_RANGE:
+        replacement = ""
+    else:
+        # WireEdits constructed directly (bypassing parse_response) may carry
+        # a plain-string op. Fail closed on anything unrecognized instead of
+        # silently degrading a replace into a delete.
+        raise BoundedEditError(
+            ErrorCode.INVALID_OPERATION, edit_index=index, file_id=edit.file_id
+        )
     return _ResolvedEdit(index, edit.file_id, start_offset, end, replacement)
 
 

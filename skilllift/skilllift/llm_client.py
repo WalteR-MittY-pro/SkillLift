@@ -118,6 +118,10 @@ class LLMClient:
         }
         if self.use_stream:
             payload["stream"] = True
+            # Ask OpenAI-compatible endpoints to report token usage in the
+            # final stream chunk; without this the usage block is omitted
+            # and token accounting silently undercounts every streamed call.
+            payload["stream_options"] = {"include_usage": True}
         if response_format is not None:
             payload["response_format"] = response_format
         if max_completion_tokens is not None:
@@ -135,8 +139,24 @@ class LLMClient:
             f"max_retries={self.max_retries} temperature={temperature} stream={self.use_stream} "
             f"system_chars={len(system_prompt)} user_chars={len(user_prompt)} body_bytes={len(body)}"
         )
-        data = self._call_with_retries(url, body, headers, request_id)
+        try:
+            data = self._call_with_retries(url, body, headers, request_id)
+        except LLMOutputError as exc:
+            if not (self.use_stream and _caused_by_http_400(exc)):
+                raise
+            _log_llm(
+                f"retrying without stream_options id={request_id} "
+                "(endpoint rejected the parameter)"
+            )
+            payload.pop("stream_options", None)
+            body = json.dumps(payload).encode("utf-8")
+            data = self._call_with_retries(url, body, headers, request_id)
         usage = data.get("usage", {})
+        if self.use_stream and not usage:
+            _log_llm(
+                f"warning: stream finished without usage data id={request_id} "
+                "(token totals undercounted for this call)"
+            )
         if isinstance(usage, dict):
             self.total_tokens += int(usage.get("total_tokens", 0) or 0)
             _log_llm(
@@ -545,6 +565,11 @@ def _raw_provider_api_key(
 
 def _is_retryable_http_error(exc: urllib.error.HTTPError) -> bool:
     return exc.code == 429 or 500 <= exc.code <= 599
+
+
+def _caused_by_http_400(exc: LLMOutputError) -> bool:
+    cause = exc.__cause__
+    return isinstance(cause, urllib.error.HTTPError) and cause.code == 400
 
 
 def _retry_sleep(attempt: int, exc: Exception) -> float:

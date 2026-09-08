@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -12,6 +13,9 @@ from typing import Any
 from ..errors import PersistenceError
 from .ref import PortfolioPatchResult, PortfolioRef, apply_portfolio_patch, portfolio_tree_hash
 from .prompts import RubricHypothesis, SearchDirection, SearchPlan
+
+
+_ATTEMPT_FILE_RE = re.compile(r"^attempt-(\d+)\.json$")
 
 
 STORE_SCHEMA_VERSION = 2
@@ -292,13 +296,16 @@ class PortfolioStore:
         return payload
 
     def attempts(self, cell_root: Path, fingerprint: str) -> list[dict[str, Any]]:
+        # Attempt indices are no longer capped at two: infrastructure
+        # failures are retried, so scan whatever markers exist.
         attempts = []
-        for attempt in range(2):
-            path = cell_root / f"attempt-{attempt}.json"
-            if not path.exists():
-                continue
+        for path in sorted(
+            (path for path in cell_root.glob("attempt-*.json") if _ATTEMPT_FILE_RE.fullmatch(path.name)),
+            key=lambda path: int(_ATTEMPT_FILE_RE.fullmatch(path.name).group(1)),
+        ):
+            index = int(_ATTEMPT_FILE_RE.fullmatch(path.name).group(1))
             payload = self._read_json(path)
-            if payload.get("fingerprint") != fingerprint or payload.get("attempt") != attempt:
+            if payload.get("fingerprint") != fingerprint or payload.get("attempt") != index:
                 raise PersistenceError(f"attempt marker fingerprint mismatch: {path}")
             attempts.append(payload)
         return attempts

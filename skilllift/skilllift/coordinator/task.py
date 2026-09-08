@@ -28,7 +28,7 @@ from ..portfolio import (
 from ..portfolio import CandidateRecord, PortfolioStore
 
 
-COORDINATOR_VERSION = "task_portfolio_coordinator_v2"
+COORDINATOR_VERSION = "task_portfolio_coordinator_v3"
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class CoordinatorConfig:
     max_rounds: int = 3
     max_candidates_per_round: int = 3
     candidate_concurrency: int = 2
-    attempts_per_cell: int = 2
+    max_consecutive_infra_failures: int = 3
     final_trials: int = 2
     mode_a_iters: int = 2
     mode_b_iters: int = 2
@@ -51,8 +51,8 @@ class CoordinatorConfig:
             raise ValueError("max_candidates_per_round must be between 1 and 3")
         if self.candidate_concurrency < 1:
             raise ValueError("candidate_concurrency must be positive")
-        if self.attempts_per_cell != 2:
-            raise ValueError("the locked protocol requires exactly two physical attempts per cell")
+        if not 1 <= self.max_consecutive_infra_failures <= 5:
+            raise ValueError("max_consecutive_infra_failures must be between 1 and 5")
         if self.final_trials != 2:
             raise ValueError("the locked protocol requires exactly two final trials")
         if self.mode_a_iters < 0:
@@ -605,6 +605,7 @@ class TaskPortfolioCoordinator:
             return CandidateEvaluation.from_dict(stored["evaluation"])
 
         attempts = self.store.attempts(cell_root, fingerprint)
+        infra_failures = 0
         for marker in attempts:
             if marker["status"] == "completed" and marker.get("evaluation"):
                 evaluation = CandidateEvaluation.from_dict(marker["evaluation"])
@@ -641,14 +642,18 @@ class TaskPortfolioCoordinator:
                 status="unrecoverable",
                 evaluation=recovered.to_dict() if recovered else None,
             )
+            infra_failures += 1
 
-        consumed = len(self.store.attempts(cell_root, fingerprint))
-        for attempt in range(consumed, self.config.attempts_per_cell):
-            trial_id = f"{phase}-{fingerprint[:16]}-a{attempt}"
+        # Infrastructure failures never consume the logical cell: every
+        # failed attempt is retried until it yields a valid evaluation or
+        # the consecutive-failure fuse trips (persistent infra outage).
+        next_attempt = len(attempts)
+        while infra_failures < self.config.max_consecutive_infra_failures:
+            trial_id = f"{phase}-{fingerprint[:16]}-a{next_attempt}"
             trial = TrialSpec(
                 trial_id=trial_id,
                 phase=phase,
-                attempt=attempt,
+                attempt=next_attempt,
                 round_index=round_index,
                 candidate_id=candidate_id,
                 final_index=final_index,
@@ -656,7 +661,7 @@ class TaskPortfolioCoordinator:
             self.store.begin_attempt(
                 cell_root,
                 fingerprint=fingerprint,
-                attempt=attempt,
+                attempt=next_attempt,
                 trial_id=trial_id,
             )
             evaluation = self.adapter.evaluate(task_id, portfolio, trial)
@@ -666,18 +671,24 @@ class TaskPortfolioCoordinator:
             self.store.finish_attempt(
                 cell_root,
                 fingerprint=fingerprint,
-                attempt=attempt,
+                attempt=next_attempt,
                 trial_id=trial_id,
                 status=status,
                 evaluation=evaluation.to_dict(),
             )
+            next_attempt += 1
             if evaluation.is_valid:
                 self._save_evaluation_result(cell_root, fingerprint, evaluation)
                 return evaluation
+            infra_failures += 1
 
-        indeterminate = CandidateEvaluation.infrastructure_failure("physical attempt budget exhausted")
-        self._save_evaluation_result(cell_root, fingerprint, indeterminate)
-        return indeterminate
+        # Fuse tripped. The indeterminate outcome is deliberately NOT
+        # persisted as the cell's final result: once the outage is fixed, a
+        # later resume retries this cell with a fresh fuse. The attempt
+        # markers remain as the audit trail of every physical oracle call.
+        return CandidateEvaluation.infrastructure_failure(
+            f"{self.config.max_consecutive_infra_failures} consecutive infrastructure failures"
+        )
 
     def _save_evaluation_result(
         self,

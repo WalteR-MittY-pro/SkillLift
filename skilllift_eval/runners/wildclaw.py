@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 import json
+import math
 import os
 import re
 
@@ -370,13 +371,28 @@ def _model_alias(endpoint: ModelEndpointProfile) -> str:
 def _score_payload(result: dict[str, Any]) -> dict[str, Any]:
     scores = result.get("scores") if isinstance(result.get("scores"), dict) else {}
     overall = scores.get("overall_score", scores.get("score"))
-    status = "failed" if result.get("error") else "succeeded"
+    reason: str | None = None
+    value: float | None = None
+    if result.get("error"):
+        reason = str(result["error"])
+    else:
+        try:
+            value = float(overall)
+        except (TypeError, ValueError):
+            reason = "score unavailable: no numeric overall_score/score in grading payload"
+        else:
+            if not math.isfinite(value):
+                reason = f"score unavailable: non-finite overall_score ({overall!r})"
+                value = None
+    # A failed or unparseable run reports score: null with the reason in
+    # error_summary — never a fabricated 0.0, which is indistinguishable
+    # from a genuine zero once aggregated into means.
     return {
-        "status": status,
-        "score": float(overall) if overall is not None and not result.get("error") else 0.0,
-        "overall_score": float(overall) if overall is not None else 0.0,
+        "status": "failed" if reason else "succeeded",
+        "score": value,
+        "overall_score": value,
         "scores": scores,
-        "error_summary": result.get("error"),
+        "error_summary": reason,
         "output_dir": result.get("output_dir"),
         "usage": result.get("usage") or {},
     }
@@ -512,7 +528,12 @@ def _cell_summary(settings: WildClawRunSettings, records: list[TaskRunRecord]) -
         if record.status != "succeeded":
             continue
         payload = json.loads(Path(record.score_path).read_text(encoding="utf-8"))
-        scores.append(float(payload["score"]))
+        try:
+            scores.append(float(payload["score"]))
+        except (KeyError, TypeError, ValueError):
+            # Score unavailable (null) or unreadable: count as not scored
+            # rather than crashing the summary or inventing a zero.
+            continue
     expected = len(records)
     succeeded = len(scores)
     completion = succeeded / expected if expected else 0.0
