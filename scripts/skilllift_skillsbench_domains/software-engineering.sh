@@ -8,6 +8,6 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 phase="${1:-train}"
 [[ $# -eq 0 ]] || shift
-SKILLLIFT_SKILLSBENCH_CONFIG="${ROOT}/configs/skilllift_skillsbench_domains/software-engineering.yaml" \
+SKILLLIFT_SKILLSBENCH_CONFIG="${ROOT}/configs/skillsbench/domains/software-engineering.yaml" \
     exec "${ROOT}/scripts/skilllift_skillsbench_domain.sh" software-engineering "${phase}" \
     "runs/skilllift_skillsbench_software-engineering_gpt54mini_v1" "$@"

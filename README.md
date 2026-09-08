@@ -164,7 +164,7 @@ change reruns the whole comparison. A `stream: true` flag enables SSE token acco
 | Benchmark | What it additionally needs |
 |---|---|
 | WildClawBench | Docker (one container per task; image via `DOCKER_IMAGE`, default `wildclawbench-ubuntu:v1.3`). Task definitions — env, seed skills, graders — are self-contained `WildClawBench/tasks/**.md`, no extra config. |
-| SkillsBench | Its own venv (`skillsbench/.venv`) and Docker; per-domain launch settings in `configs/skilllift_skillsbench_domains/*.yaml` (split, trials, thresholds, run roots). |
+| SkillsBench | Its own venv (`skillsbench/.venv`) and Docker; per-domain launch settings in `configs/skillsbench/domains/*.yaml` (split, trials, thresholds, run roots). |
 | tau2-bench | A `tau2-bench/.env` with the same provider/judge variables; select domains via `--tau2.domains`. |
 
 **3 · Algorithm knobs.** Method parameters come from profiles in

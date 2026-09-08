@@ -8,6 +8,6 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 phase="${1:-train}"
 [[ $# -eq 0 ]] || shift
-SKILLLIFT_SKILLSBENCH_CONFIG="${ROOT}/configs/skilllift_skillsbench_domains/office-white-collar.yaml" \
+SKILLLIFT_SKILLSBENCH_CONFIG="${ROOT}/configs/skillsbench/domains/office-white-collar.yaml" \
     exec "${ROOT}/scripts/skilllift_skillsbench_domain.sh" office-white-collar "${phase}" \
     "runs/skilllift_skillsbench_office-white-collar_gpt54mini_v1" "$@"

@@ -225,7 +225,7 @@ def test_task_cli_routes_baselines_without_changing_default() -> None:
 
 def test_baseline_config_uses_shared_prewarm_template() -> None:
     config = yaml.safe_load(
-        (ROOT / "configs" / "skilllift_skillsbench_tasks.yaml").read_text(
+        (ROOT / "configs" / "skillsbench" / "tasks.yaml").read_text(
             encoding="utf-8"
         )
     )

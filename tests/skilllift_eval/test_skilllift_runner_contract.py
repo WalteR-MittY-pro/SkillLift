@@ -87,7 +87,7 @@ def test_benchmark_config_mappings_share_core_and_limit_outer_differences() -> N
         (ROOT / "skilllift_eval" / "algorithm_params" / "skilllift.paper_default.yaml").read_text(encoding="utf-8")
     )
     skillsbench_profile = yaml.safe_load(
-        (ROOT / "configs" / "skilllift_skillsbench_tasks.yaml").read_text(encoding="utf-8")
+        (ROOT / "configs" / "skillsbench" / "tasks.yaml").read_text(encoding="utf-8")
     )
     wildclaw_params = wildclaw_profile["resolved_params"]
     skillsbench_params = skillsbench_profile["skilllift"]

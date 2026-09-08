@@ -37,7 +37,7 @@ def test_domain_script_exposes_category_phase_and_run_root_contract() -> None:
 def test_each_domain_has_a_launcher_and_dedicated_config() -> None:
     for domain in DOMAINS:
         script = ROOT / "scripts" / "skilllift_skillsbench_domains" / f"{domain}.sh"
-        config_path = ROOT / "configs" / "skilllift_skillsbench_domains" / f"{domain}.yaml"
+        config_path = ROOT / "configs" / "skillsbench" / "domains" / f"{domain}.yaml"
 
         completed = subprocess.run(
             ["bash", str(script), "--help"],

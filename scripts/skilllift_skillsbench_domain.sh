@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG="${SKILLLIFT_SKILLSBENCH_CONFIG:-${ROOT}/configs/skilllift_skillsbench_all.yaml}"
+CONFIG="${SKILLLIFT_SKILLSBENCH_CONFIG:-${ROOT}/configs/skillsbench/tasks.yaml}"
 
 usage() {
     cat <<'EOF'

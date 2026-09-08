@@ -8,6 +8,6 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 phase="${1:-train}"
 [[ $# -eq 0 ]] || shift
-SKILLLIFT_SKILLSBENCH_CONFIG="${ROOT}/configs/skilllift_skillsbench_domains/industrial-physical-systems.yaml" \
+SKILLLIFT_SKILLSBENCH_CONFIG="${ROOT}/configs/skillsbench/domains/industrial-physical-systems.yaml" \
     exec "${ROOT}/scripts/skilllift_skillsbench_domain.sh" industrial-physical-systems "${phase}" \
     "runs/skilllift_skillsbench_industrial-physical-systems_gpt54mini_v1" "$@"

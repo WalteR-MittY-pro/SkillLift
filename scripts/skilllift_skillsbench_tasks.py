@@ -38,7 +38,7 @@ from skilllift_eval.runners.skilllift_thresholds import probability_param  # noq
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run per-task SkillPortfolio CoEvo on SkillsBench.")
-    parser.add_argument("--config", type=Path, default=ROOT / "configs" / "skilllift_skillsbench_tasks.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs" / "skillsbench" / "tasks.yaml")
     parser.add_argument(
         "--baseline",
         choices=("skilllift", "coevoskills"),
