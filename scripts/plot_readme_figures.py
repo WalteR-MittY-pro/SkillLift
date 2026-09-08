@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Regenerate the README result figures from docs/assets/data/paper_results.json.
+"""Regenerate the README result figures.
 
+The benchmark numbers live in the RESULTS dict below — edit them there.
 Outputs SVG (embedded in README.md, text baked to paths) and PNG (preview)
-into docs/assets/figures/.
+into assets/figures/.
 
 Usage: python scripts/plot_readme_figures.py
 Requires: matplotlib
@@ -10,15 +11,57 @@ Requires: matplotlib
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_PATH = ROOT / "docs" / "assets" / "data" / "paper_results.json"
-OUT_DIR = ROOT / "docs" / "assets" / "figures"
+OUT_DIR = ROOT / "assets" / "figures"
+
+# Benchmark results embedded from the evaluation records: overall pass rate (%)
+# for SkillLift and baselines on WildClawBench (60 tasks) and SkillsBench
+# (87 tasks), 3 rollout seeds, mean per-task best evolved-skill score. Evolving
+# baselines share the same seed skills and receive 2x SkillLift's token budget.
+# WildClawBench uses GPT-5.4 and SkillsBench uses GPT-5.4-mini, aligning with
+# the official implementations.
+RESULTS = {
+    "methods": [
+        "No skill",
+        "+ Human-written",
+        "+ LLM-written",
+        "+ SkillOpt",
+        "+ CoEvoSkills",
+        "+ SkillLift (ours)",
+    ],
+    "main_results": {
+        "WildClawBench": {
+            "GPT-5.4":         [50.3, 56.9, 55.7, 64.3, 62.2, 68.4],
+            "GLM-5.1":         [48.1, 55.2, 52.2, 62.0, 55.9, 66.5],
+            "DeepSeek-V4-Pro": [44.4, 53.6, 48.3, 59.5, 54.7, 62.4],
+        },
+        "SkillsBench": {
+            "GPT-5.4-mini":    [29.9, 41.4, 39.5, 58.2, 52.5, 62.5],
+            "GLM-5.1":         [32.7, 58.4, 57.5, 70.5, 66.6, 75.1],
+            "DeepSeek-V4-Pro": [26.9, 50.1, 47.9, 69.0, 66.3, 74.3],
+        },
+    },
+    "token_efficiency": {
+        # Cumulative tokens to first reach the 0.9-quantile pass rate on
+        # SkillsBench, as a multiple of SkillLift's cost (SkillLift = 1.0x).
+        "models": ["GPT-5.4-mini", "GLM-5.1", "DeepSeek-V4"],
+        "SkillOpt":    [2.74, 2.22, 2.62],
+        "CoEvoSkills": [2.68, 2.17, 2.13],
+    },
+    "ablation": {
+        # Ablation on SkillsBench (overall pass rate, %).
+        "variants": ["w/o rubricator", "w/o seed skills", "w/ score regression", "SkillLift (full)"],
+        "models": ["GPT-5.4-mini", "GLM-5.1", "DeepSeek-V4"],
+        "GPT-5.4-mini": [42.5, 57.5, 59.8, 62.5],
+        "GLM-5.1":      [59.8, 71.3, 72.4, 75.1],
+        "DeepSeek-V4":  [65.5, 67.8, 69.0, 74.3],
+    },
+}
 
 # NPG-inspired scientific palette, colorblind-considered.
 C_OURS = "#E64B35"      # vermillion — SkillLift
@@ -185,10 +228,9 @@ def plot_ablation(data):
 
 
 def main():
-    data = json.loads(DATA_PATH.read_text(encoding="utf-8"))
-    plot_main_results(data)
-    plot_token_efficiency(data)
-    plot_ablation(data)
+    plot_main_results(RESULTS)
+    plot_token_efficiency(RESULTS)
+    plot_ablation(RESULTS)
 
 
 if __name__ == "__main__":

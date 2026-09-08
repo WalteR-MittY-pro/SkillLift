@@ -9,13 +9,13 @@
 [![Docker](https://img.shields.io/badge/Docker-required-2496ED.svg)](https://www.docker.com/)
 [![Benchmarks](https://img.shields.io/badge/tasks-147%20across%202%20benchmarks-blueviolet)](#results)
 
-<img src="docs/assets/figures/method_overview.png" alt="SkillLift overview: inner-loop rubric-guided skill update (zero oracle cost) and outer-loop oracle-aligned rubric update via Kendall tau" width="100%">
+<img src="assets/figures/method_overview.png" alt="SkillLift overview: inner-loop rubric-guided skill update (zero oracle cost) and outer-loop oracle-aligned rubric update via Kendall tau" width="100%">
 
 **SkillLift wins all six model × benchmark combinations**, lifting the one-shot skill ceiling by
 **+8.8–11.5 pp** on WildClawBench and **+16.7–24.2 pp** on SkillsBench, while baselines need
 **2.1–2.7× more tokens** to reach the same accuracy.
 
-[Highlights](#why-skilllift) · [Results](#results) · [How it works](#how-it-works) · [Installation](#installation) · [Quickstart](#quickstart) · [Methods](#supported-methods) · [Structure](#project-structure)
+[Highlights](#why-skilllift) · [Results](#results) · [How it works](#how-it-works) · [Installation](#installation) · [Configuration](#configuration) · [Quickstart](#quickstart) · [Methods](#supported-methods) · [Structure](#project-structure)
 
 </div>
 
@@ -51,14 +51,14 @@ SkillLift's token budget**. Scores are mean per-task best evolved-skill pass rat
 seeds with early stopping after 2 stagnant rounds.
 
 <div align="center">
-<img src="docs/assets/figures/main_results.svg" alt="Overall pass rate by model and benchmark" width="100%">
+<img src="assets/figures/main_results.svg" alt="Overall pass rate by model and benchmark" width="100%">
 </div>
 
 Across all six model × benchmark combinations SkillLift delivers the top overall pass rate, with
 the largest jumps on SkillsBench where deterministic verifiers give crisp oracle signal.
 
 <div align="center">
-<img src="docs/assets/figures/token_efficiency.svg" alt="Token efficiency on SkillsBench" width="82%">
+<img src="assets/figures/token_efficiency.svg" alt="Token efficiency on SkillsBench" width="82%">
 </div>
 
 On SkillsBench, reaching the 0.9-quantile accuracy costs SkillOpt **2.13–2.74×** and CoEvoSkills
@@ -71,7 +71,7 @@ while subjective Creative writing stays nearly flat — binary rubric criteria m
 deterministic verifier wherever verification exists.
 
 <div align="center">
-<img src="docs/assets/figures/ablation.svg" alt="Ablation study on SkillsBench" width="82%">
+<img src="assets/figures/ablation.svg" alt="Ablation study on SkillsBench" width="82%">
 </div>
 
 **Ablations confirm the mechanism.** Removing oracle-aligned rubric revision collapses pass rates
@@ -88,11 +88,11 @@ score 0.0; the oracle ranking exposes the misalignment, the rubricator re-plans 
 dial-a-ride audit, and Round 1's accepted patch reaches **1.0** at 7.37M tokens.
 
 <div align="center">
-<img src="docs/assets/figures/case_study.png" alt="Case study: rubric and skill co-evolution on a paratransit scheduling task across two outer rounds" width="100%">
+<img src="assets/figures/case_study.png" alt="Case study: rubric and skill co-evolution on a paratransit scheduling task across two outer rounds" width="100%">
 </div>
 
-All numbers above ship with this repository as data — see
-[`docs/assets/data/paper_results.json`](docs/assets/data/paper_results.json) and
+All numbers above are checked in with the repository — they live in the `RESULTS` dict of
+[`scripts/plot_readme_figures.py`](scripts/plot_readme_figures.py); see
 [Regenerating the figures](#regenerating-the-figures).
 
 ## How it works
@@ -100,7 +100,7 @@ All numbers above ship with this repository as data — see
 SkillLift solves skill evolution as a **bilevel optimization** via alternating updates:
 
 <div align="center">
-<img src="docs/assets/figures/how_it_works.svg" alt="Two-loop schematic: Mode A rubric-guided skill update and Mode B oracle-aligned rubric update" width="100%">
+<img src="assets/figures/how_it_works.svg" alt="Two-loop schematic: Mode A rubric-guided skill update and Mode B oracle-aligned rubric update" width="100%">
 </div>
 
 - **Inner loop (Mode A):** the frozen rubric guides skill revision. Each branch is refined only
@@ -136,10 +136,43 @@ cp .env.example .env   # then fill in your endpoints and keys
 > tau2-bench runs additionally read `tau2-bench/.env` — create it with the same
 > provider/judge variables you plan to use for tau2 evaluation.
 
-All model endpoints are environment-driven. Each provider needs a triplet, e.g.
-`GLM_MODEL` / `GLM_BASE_URL` / `GLM_API_KEY` (see `.env.example` for the full list:
-`GPT_*`, `CLAUDE_*`, `GLM_*`, `QWEN_*`, `DEEPSEEK_*`, `MINIMAX_*`). Endpoint profiles live in
-[`skilllift_eval/config.yaml`](skilllift_eval/config.yaml).
+See [Configuration](#configuration) for endpoints, per-benchmark setup, and algorithm knobs.
+
+## Configuration
+
+**1 · Model endpoints.** Everything is environment-driven — no keys in code. Each provider is a
+triplet in `.env` (copy `.env.example`), e.g. `GLM_MODEL` / `GLM_BASE_URL` / `GLM_API_KEY`. The
+label you pass as `--model` selects an endpoint profile in
+[`skilllift_eval/config.yaml`](skilllift_eval/config.yaml), which maps it to the env triplet:
+
+```yaml
+model_endpoints:
+  glm-5.1:
+    provider: openai-completions
+    provider_model_id_env: GLM_MODEL
+    base_url_env: GLM_BASE_URL
+    api_key_env: GLM_API_KEY
+    timeout_seconds: 300
+    max_retries: 4
+```
+
+The same profile drives the agent, the judge, and all SkillLift framework modules, so one model
+change reruns the whole comparison. A `stream: true` flag enables SSE token accounting.
+
+**2 · Per-benchmark setup.**
+
+| Benchmark | What it additionally needs |
+|---|---|
+| WildClawBench | Docker (one container per task; image via `DOCKER_IMAGE`, default `wildclawbench-ubuntu:v1.3`). Task definitions — env, seed skills, graders — are self-contained `WildClawBench/tasks/**.md`, no extra config. |
+| SkillsBench | Its own venv (`skillsbench/.venv`) and Docker; per-domain launch settings in `configs/skilllift_skillsbench_domains/*.yaml` (split, trials, thresholds, run roots). |
+| tau2-bench | A `tau2-bench/.env` with the same provider/judge variables; select domains via `--tau2.domains`. |
+
+**3 · Algorithm knobs.** Method parameters come from profiles in
+`skilllift_eval/algorithm_params/<method>.paper_default.yaml`, selected with
+`--param-profile`, and can be overridden one-off with `--algo-param key=value`. The SkillLift
+defaults: rounds `L=3`, population `K=3`, inner/outer step caps `2/2`, verifier threshold
+`θ_A=0.85`, rank-alignment `θ_B=0.9`, stop threshold `θ_stop=0.9`. Evaluation budget semantics
+switch with `--evaluation-mode native_end_to_end|budget_matched`.
 
 ## Quickstart
 
@@ -203,8 +236,8 @@ fork's git log for the exact deltas.
 | `skilllift_eval/` | Evaluation framework: CLI, runners for every baseline × benchmark pair, resume, token accounting |
 | `skilllift/skilllift/` | Algorithm core: portfolio coordinator, Modes A/B, rubricator, verifier, oracle adapters |
 | `packages/bounded-edits/` | Constrained unified-diff edit engine used for all skill revisions |
-| `configs/` | Domain configs for SkillsBench runs |
-| `docs/assets/` | README figures (SVG), their data (JSON), and the plotting script |
+| `configs/` | Per-domain launch configs for SkillsBench runs (other benchmarks configure via `skilllift_eval/config.yaml` + CLI flags) |
+| `assets/` | README figures (SVG artwork + generated charts) |
 | `scripts/` | Batch drivers and per-benchmark launch scripts |
 | `WildClawBench/`, `tau2-bench/`, `skillsbench/` | Benchmark submodules (tasks, skills, graders) |
 | `skilllift/README.md` | Deep dive into the co-evolution loop, knobs, and artifacts |
@@ -215,11 +248,11 @@ The three data charts in this README are rendered from checked-in data — no sc
 
 ```bash
 pip install matplotlib
-python scripts/plot_readme_figures.py   # writes docs/assets/figures/*.svg
+python scripts/plot_readme_figures.py   # writes assets/figures/*.svg
 ```
 
 The method overview and case-study diagrams ship as high-resolution artwork under
-`docs/assets/figures/`.
+`assets/figures/`.
 
 ## Tests
 
