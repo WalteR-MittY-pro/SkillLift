@@ -133,9 +133,6 @@ pip install -e packages/bounded-edits
 cp .env.example .env   # then fill in your endpoints and keys
 ```
 
-> tau2-bench runs additionally read `tau2-bench/.env` — create it with the same
-> provider/judge variables you plan to use for tau2 evaluation.
-
 See [Configuration](#configuration) for endpoints, per-benchmark setup, and algorithm knobs.
 
 ## Configuration
@@ -165,7 +162,6 @@ change reruns the whole comparison. A `stream: true` flag enables SSE token acco
 |---|---|
 | WildClawBench | Docker (one container per task; image via `DOCKER_IMAGE`, default `wildclawbench-ubuntu:v1.3`). Task definitions — env, seed skills, graders — are self-contained `WildClawBench/tasks/**.md`, no extra config. |
 | SkillsBench | Its own venv (`skillsbench/.venv`) and Docker; per-domain launch settings in `configs/skillsbench/domains/*.yaml` (split, trials, thresholds, run roots). |
-| tau2-bench | A `tau2-bench/.env` with the same provider/judge variables; select domains via `--tau2.domains`. |
 
 **3 · Algorithm knobs.** Method parameters come from profiles in
 `skilllift_eval/algorithm_params/<method>.paper_default.yaml`, selected with
@@ -188,12 +184,12 @@ python -m skilllift_eval.cli run skilllift \
 python scripts/skilllift_wildclaw_tasks.py --model glm-5.1 --run-root runs/skilllift_wildclaw_tasks --resume
 ```
 
-Run a baseline on tau2-bench:
+Run a baseline for comparison:
 
 ```bash
 python -m skilllift_eval.cli run no_skill \
-    --benchmark tau2 --model glm-5.1 \
-    --config skilllift_eval/config.yaml --tau2.domains airline,retail,telecom
+    --benchmark wildclawbench --model glm-5.1 \
+    --config skilllift_eval/config.yaml --tasks.mode single --tasks.filter <task-id>
 ```
 
 Run SkillsBench (requires `skillsbench/.venv` and Docker):
@@ -223,7 +219,6 @@ Useful flags: `--dry-run`, `--evaluation-mode native_end_to_end|budget_matched`,
 |---|:-:|---|---|
 | [WildClawBench](https://github.com/WalteR-MittY-pro/WildClawBench) | 60 | OpenClaw CLI in Docker | 6 categories, bilingual, multimodal |
 | [SkillsBench](https://github.com/WalteR-MittY-pro/skillsbench) | 87 | OpenHands | 8 domains, deterministic verifiers |
-| [tau2-bench](https://github.com/WalteR-MittY-pro/tau2-bench) | — | τ-bench agent–user–tool | airline / retail / telecom |
 
 The benchmark submodules are lightly patched forks of their upstreams (skill-injection hooks,
 seed-skill declarations, harness hardening) required to run skill evolution end-to-end; see each
@@ -239,7 +234,7 @@ fork's git log for the exact deltas.
 | `configs/` | Per-domain launch configs for SkillsBench runs (other benchmarks configure via `skilllift_eval/config.yaml` + CLI flags) |
 | `assets/` | README figures (SVG artwork + generated charts) |
 | `scripts/` | Batch drivers and per-benchmark launch scripts |
-| `WildClawBench/`, `tau2-bench/`, `skillsbench/` | Benchmark submodules (tasks, skills, graders) |
+| `WildClawBench/`, `skillsbench/` | Benchmark submodules (tasks, skills, graders) |
 | `skilllift/README.md` | Deep dive into the co-evolution loop, knobs, and artifacts |
 
 ## Regenerating the figures
