@@ -1,0 +1,10 @@
+openai>=1.68,<3
+numpy>=1.26,<3
+PyYAML>=6,<7
+python-dotenv>=1,<2
+json-repair>=0.54,<1
+certifi
+pytest>=8.3,<9
+benchflow[sandbox-daytona]==0.6.3
+huggingface-hub>=0.30,<2
+# Official SkillOpt and local SkillLift are installed by setup.sh from fixed sources.

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "models": ["glm", "deepseek"],
+  "evolution_runs": 3,
+  "test_repeats": 1,
+  "workers": 4,
+  "solver": {"max_steps": 100, "timeout_seconds": 1800, "command_timeout_seconds": 120, "max_output_tokens": 16384, "temperature": 0.0},
+  "skilllearnbench": {
+    "revision": "726e1f79b96b0cb3d729d0e55a1c847e0b5353ae",
+    "train_instance": 1,
+    "methods": ["no_skill", "human_written", "llm_written", "skillopt", "skilllift"],
+    "pilot_families": ["court-form-filling", "weighted-gdp-calculation"],
+    "claim": "held-out instances within seen task families",
+    "human_written_label": "author-provided reference skills; train-only authorship not established",
+    "harness": "shared OpenAI-compatible Docker tool agent with official environments and verifiers; not the original Claude CLI harness"
+  },
+  "skilllift": {"max_rounds": 3, "max_candidates_per_round": 3, "candidate_concurrency": 1, "mode_a_iters": 2, "mode_b_iters": 2, "mode_a_min_score_threshold": 0.85, "rank_alignment_threshold": 0.9, "max_context_chars": 120000, "final_trials": 2},
+  "skillopt": {"revision": "84b36cd5564e8893569e50e37f02a81d10b55e27", "num_epochs": 3, "edit_budget": 4, "min_edit_budget": 2, "merge_batch_size": 8, "sel_env_num": 2, "analyst_workers": 1, "selection_protocol": "fresh executions of instance 1; no held-out selection instances"},
+  "ablation": {"benchmarks": ["skillsbench", "wildclawbench"], "methods": ["skilllift", "direct_oracle"], "final_repeats": 3, "matched_token_cap": false},
+  "statistics": {"confidence": 0.95, "bootstrap_repeats": 10000, "permutation_repeats": 20000, "random_seed": 20261025, "multiplicity": "Holm", "incomplete_cohorts": "report coverage only; do not calculate CI or p"},
+  "notes": ["3 evolution_runs means fresh optimization processes, not 3 retries.", "The 2 internal SkillLift final trials are training-instance reevaluations, not held-out tests.", "No skill, human-written and frozen LLM-written repeat execution once per run index; they are not re-authored.", "Completed family/run cells resume by frozen content hash. Interrupted training cells restart in a new attempt.", "Two days is a runtime target, not a measured guarantee. Review pilot costs and timing before the full run."]
+}

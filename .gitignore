@@ -19,3 +19,7 @@ runs/*
 
 # local-only benchmark checkout (unfinished experiment, not distributed)
 tau2-bench/
+
+# Reproducible experiment downloads and machine-local execution state
+.cache/revision2026/
+.venv-revision2026/

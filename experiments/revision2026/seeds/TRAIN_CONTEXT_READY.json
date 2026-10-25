@@ -1,0 +1,9 @@
+{
+  "task_families": 20,
+  "downloaded_source_files": 220,
+  "metadata_only_sources": 10,
+  "context_files": 240,
+  "context_bytes": 37184937,
+  "manifest_sha256": "23979c09389868e7102e4413ac0d53bf044568a815921847f629e90db53ba363",
+  "prompt_sha256": "4528632a8658629b1698479fc040e746ba5535e8d1f7e4bc41a0cfec2c68f435"
+}

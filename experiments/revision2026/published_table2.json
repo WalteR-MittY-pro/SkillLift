@@ -1,0 +1,65 @@
+{
+  "methods": [
+    "No skill",
+    "+ Human-written",
+    "+ LLM-written",
+    "+ SkillOpt",
+    "+ CoEvoSkills",
+    "+ SkillLift (ours)"
+  ],
+  "main_results": {
+    "WildClawBench": {
+      "GPT-5.4": [
+        50.3,
+        56.9,
+        55.7,
+        64.3,
+        62.2,
+        68.4
+      ],
+      "GLM-5.1": [
+        48.1,
+        55.2,
+        52.2,
+        62.0,
+        55.9,
+        66.5
+      ],
+      "DeepSeek-V4-Pro": [
+        44.4,
+        53.6,
+        48.3,
+        59.5,
+        54.7,
+        62.4
+      ]
+    },
+    "SkillsBench": {
+      "GPT-5.4-mini": [
+        29.9,
+        41.4,
+        39.5,
+        58.2,
+        52.5,
+        62.5
+      ],
+      "GLM-5.1": [
+        32.7,
+        58.4,
+        57.5,
+        70.5,
+        66.6,
+        75.1
+      ],
+      "DeepSeek-V4-Pro": [
+        26.9,
+        50.1,
+        47.9,
+        69.0,
+        66.3,
+        74.3
+      ]
+    }
+  },
+  "provenance": "Historical Table 2 presentation constants, supplied workspace scripts/plot_readme_figures.py; these means have NOT been independently reconstructed."
+}

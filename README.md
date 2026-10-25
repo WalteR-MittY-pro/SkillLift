@@ -249,6 +249,14 @@ python scripts/plot_readme_figures.py   # writes assets/figures/*.svg
 The method overview and case-study diagrams ship as high-resolution artwork under
 `assets/figures/`.
 
+## Supplementary experiments on WSL
+
+The [WSL execution guide](experiments/revision2026/README.md) covers SkillLearnBench
+generalization, Direct Oracle ablations on SkillsBench/WildClawBench, and legacy
+Table 2 recovery, independent reevaluation, and statistical reporting. It includes
+the frozen GPT-6-SOL skills and pinned upstream revisions. Real model/Docker
+validation runs on the execution machine; offline tests do not establish benchmark scores.
+
 ## Tests
 
 ```bash

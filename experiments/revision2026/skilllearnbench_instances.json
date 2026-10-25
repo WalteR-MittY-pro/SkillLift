@@ -1,0 +1,605 @@
+{
+  "revision": "726e1f79b96b0cb3d729d0e55a1c847e0b5353ae",
+  "instances": [
+    {
+      "family": "anthropic-poster-design",
+      "number": 1,
+      "path": "tasks/anthropic-poster-design/anthropic-poster-design-1",
+      "instruction_git_blob": "1656c834de1cc0ba8663d3498765c9a305ea249a"
+    },
+    {
+      "family": "anthropic-poster-design",
+      "number": 2,
+      "path": "tasks/anthropic-poster-design/anthropic-poster-design-2",
+      "instruction_git_blob": "d11cab0abc72123059b185aa4efc69fd2ad75270"
+    },
+    {
+      "family": "anthropic-poster-design",
+      "number": 3,
+      "path": "tasks/anthropic-poster-design/anthropic-poster-design-3",
+      "instruction_git_blob": "3d4b82a994147c4d8f9d401c932a1d5345f69f4e"
+    },
+    {
+      "family": "anthropic-poster-design",
+      "number": 4,
+      "path": "tasks/anthropic-poster-design/anthropic-poster-design-4",
+      "instruction_git_blob": "aee118eb2d4800cb925ed63222eb1364a915a0cc"
+    },
+    {
+      "family": "anthropic-poster-design",
+      "number": 5,
+      "path": "tasks/anthropic-poster-design/anthropic-poster-design-5",
+      "instruction_git_blob": "6af8e32f35b4a1141d3183703005a3f45f5a2986"
+    },
+    {
+      "family": "chinese-poem-generator",
+      "number": 1,
+      "path": "tasks/chinese-poem-generator/chinese-poem-generator-1",
+      "instruction_git_blob": "c3dd5ff0ab42a973dd5074f4a6ebf64499cc6f51"
+    },
+    {
+      "family": "chinese-poem-generator",
+      "number": 2,
+      "path": "tasks/chinese-poem-generator/chinese-poem-generator-2",
+      "instruction_git_blob": "b720f4f39eedeb893c59c5464dab964738c1277f"
+    },
+    {
+      "family": "chinese-poem-generator",
+      "number": 3,
+      "path": "tasks/chinese-poem-generator/chinese-poem-generator-3",
+      "instruction_git_blob": "8533f2e6e341bdf89a17ad5b55ceb66a40ade0c9"
+    },
+    {
+      "family": "chinese-poem-generator",
+      "number": 4,
+      "path": "tasks/chinese-poem-generator/chinese-poem-generator-4",
+      "instruction_git_blob": "28d53e87d40085e82c0a9977309108d85140612d"
+    },
+    {
+      "family": "chinese-poem-generator",
+      "number": 5,
+      "path": "tasks/chinese-poem-generator/chinese-poem-generator-5",
+      "instruction_git_blob": "137f5a68e6cea41b9f55d85287a14850c963c41a"
+    },
+    {
+      "family": "court-form-filling",
+      "number": 1,
+      "path": "tasks/court-form-filling/court-form-filling-1",
+      "instruction_git_blob": "4cd5c49dce858b5db3b546051a0b5014d6c0fd5d"
+    },
+    {
+      "family": "court-form-filling",
+      "number": 2,
+      "path": "tasks/court-form-filling/court-form-filling-2",
+      "instruction_git_blob": "ca9145e8232d6b5dbc9700f015701fe1fbbad0a4"
+    },
+    {
+      "family": "court-form-filling",
+      "number": 3,
+      "path": "tasks/court-form-filling/court-form-filling-3",
+      "instruction_git_blob": "cca6f30ce4a2f5c28f3b3a7999330f06400e5528"
+    },
+    {
+      "family": "court-form-filling",
+      "number": 4,
+      "path": "tasks/court-form-filling/court-form-filling-4",
+      "instruction_git_blob": "9fce9cb6dc3a9b54eb5689f5882bbf746c66b176"
+    },
+    {
+      "family": "court-form-filling",
+      "number": 5,
+      "path": "tasks/court-form-filling/court-form-filling-5",
+      "instruction_git_blob": "5ceff9ccc6d8a7ecfc23fcd22d3ec64abdbe1946"
+    },
+    {
+      "family": "court-form-filling",
+      "number": 6,
+      "path": "tasks/court-form-filling/court-form-filling-6",
+      "instruction_git_blob": "4deae791db55066b19a31e3cdcaaed4abec4b276"
+    },
+    {
+      "family": "dbscan-parameter-tuning",
+      "number": 1,
+      "path": "tasks/dbscan-parameter-tuning/dbscan-parameter-tuning-1",
+      "instruction_git_blob": "599fffaa252368d3abb43eb692e83194f370db5d"
+    },
+    {
+      "family": "dbscan-parameter-tuning",
+      "number": 2,
+      "path": "tasks/dbscan-parameter-tuning/dbscan-parameter-tuning-2",
+      "instruction_git_blob": "f22dcb37c5507da80e7e16dc23d6fb6281ff212b"
+    },
+    {
+      "family": "dbscan-parameter-tuning",
+      "number": 3,
+      "path": "tasks/dbscan-parameter-tuning/dbscan-parameter-tuning-3",
+      "instruction_git_blob": "c055975051722fd06a24401efde5a0af1afda288"
+    },
+    {
+      "family": "dbscan-parameter-tuning",
+      "number": 4,
+      "path": "tasks/dbscan-parameter-tuning/dbscan-parameter-tuning-4",
+      "instruction_git_blob": "7b0e9a5d772bcf9f6b641ea929e311c201c26cdb"
+    },
+    {
+      "family": "dbscan-parameter-tuning",
+      "number": 5,
+      "path": "tasks/dbscan-parameter-tuning/dbscan-parameter-tuning-5",
+      "instruction_git_blob": "c469f9885c52d6ad5f87d0369a0a758217c5ae56"
+    },
+    {
+      "family": "dependency-vulnerability-check",
+      "number": 1,
+      "path": "tasks/dependency-vulnerability-check/dependency-vulnerability-check-1",
+      "instruction_git_blob": "08c4a2310013fdcb9b5af164a5b2af59fa052bd1"
+    },
+    {
+      "family": "dependency-vulnerability-check",
+      "number": 2,
+      "path": "tasks/dependency-vulnerability-check/dependency-vulnerability-check-2",
+      "instruction_git_blob": "8f734b5bf8cb46bf0e3d42f2eacc1dd800506341"
+    },
+    {
+      "family": "dependency-vulnerability-check",
+      "number": 3,
+      "path": "tasks/dependency-vulnerability-check/dependency-vulnerability-check-3",
+      "instruction_git_blob": "7c37dd15079bcba0f6c4d23d4b1606b920a0d3e1"
+    },
+    {
+      "family": "dependency-vulnerability-check",
+      "number": 4,
+      "path": "tasks/dependency-vulnerability-check/dependency-vulnerability-check-4",
+      "instruction_git_blob": "da183fb08eeecc85d4869f0ace8ea88c2624e2bd"
+    },
+    {
+      "family": "dependency-vulnerability-check",
+      "number": 5,
+      "path": "tasks/dependency-vulnerability-check/dependency-vulnerability-check-5",
+      "instruction_git_blob": "36a7e7a7e1bfcd51ed9d7f6ed6addcda517fe91d"
+    },
+    {
+      "family": "earthquake-plate-calculation",
+      "number": 1,
+      "path": "tasks/earthquake-plate-calculation/earthquake-plate-calculation-1",
+      "instruction_git_blob": "462bf38cdeec400c948a177ea0cd78c396064ddb"
+    },
+    {
+      "family": "earthquake-plate-calculation",
+      "number": 2,
+      "path": "tasks/earthquake-plate-calculation/earthquake-plate-calculation-2",
+      "instruction_git_blob": "d8384f90faeafb0556e1294cb0b9b0fadc1cbbe1"
+    },
+    {
+      "family": "earthquake-plate-calculation",
+      "number": 3,
+      "path": "tasks/earthquake-plate-calculation/earthquake-plate-calculation-3",
+      "instruction_git_blob": "d879fe7cbad67dd6685accb9ec9c35efa2f816b6"
+    },
+    {
+      "family": "earthquake-plate-calculation",
+      "number": 4,
+      "path": "tasks/earthquake-plate-calculation/earthquake-plate-calculation-4",
+      "instruction_git_blob": "6966a76220f5588d89cfd6446cfd1a4aa7796ca8"
+    },
+    {
+      "family": "earthquake-plate-calculation",
+      "number": 5,
+      "path": "tasks/earthquake-plate-calculation/earthquake-plate-calculation-5",
+      "instruction_git_blob": "446fb19afe2a4d804aeeaf1edfad830a1caf8382"
+    },
+    {
+      "family": "earthquake-plate-calculation",
+      "number": 6,
+      "path": "tasks/earthquake-plate-calculation/earthquake-plate-calculation-6",
+      "instruction_git_blob": "e9c672f0bec645445ebee18a7d6c8da3cb0984db"
+    },
+    {
+      "family": "enterprise-information-search",
+      "number": 1,
+      "path": "tasks/enterprise-information-search/enterprise-information-search-1",
+      "instruction_git_blob": "b481dcf757a873ce8c5773ce44dcea8fe1bc3510"
+    },
+    {
+      "family": "enterprise-information-search",
+      "number": 2,
+      "path": "tasks/enterprise-information-search/enterprise-information-search-2",
+      "instruction_git_blob": "b481dcf757a873ce8c5773ce44dcea8fe1bc3510"
+    },
+    {
+      "family": "enterprise-information-search",
+      "number": 3,
+      "path": "tasks/enterprise-information-search/enterprise-information-search-3",
+      "instruction_git_blob": "b481dcf757a873ce8c5773ce44dcea8fe1bc3510"
+    },
+    {
+      "family": "enterprise-information-search",
+      "number": 4,
+      "path": "tasks/enterprise-information-search/enterprise-information-search-4",
+      "instruction_git_blob": "b481dcf757a873ce8c5773ce44dcea8fe1bc3510"
+    },
+    {
+      "family": "enterprise-information-search",
+      "number": 5,
+      "path": "tasks/enterprise-information-search/enterprise-information-search-5",
+      "instruction_git_blob": "b481dcf757a873ce8c5773ce44dcea8fe1bc3510"
+    },
+    {
+      "family": "enterprise-information-search",
+      "number": 6,
+      "path": "tasks/enterprise-information-search/enterprise-information-search-6",
+      "instruction_git_blob": "b481dcf757a873ce8c5773ce44dcea8fe1bc3510"
+    },
+    {
+      "family": "financial-analysis",
+      "number": 1,
+      "path": "tasks/financial-analysis/financial-analysis-1",
+      "instruction_git_blob": "746120c0d4381b98f296606c026105eb41a47226"
+    },
+    {
+      "family": "financial-analysis",
+      "number": 2,
+      "path": "tasks/financial-analysis/financial-analysis-2",
+      "instruction_git_blob": "68e1333cee3cc42be236adf82b5b736ea4dd9872"
+    },
+    {
+      "family": "financial-analysis",
+      "number": 3,
+      "path": "tasks/financial-analysis/financial-analysis-3",
+      "instruction_git_blob": "9e2517f9c42eefa58d27062fd43b163d6450eb0c"
+    },
+    {
+      "family": "financial-analysis",
+      "number": 4,
+      "path": "tasks/financial-analysis/financial-analysis-4",
+      "instruction_git_blob": "744031bf00c8ae29c7b4377533611ad8cee68b28"
+    },
+    {
+      "family": "financial-analysis",
+      "number": 5,
+      "path": "tasks/financial-analysis/financial-analysis-5",
+      "instruction_git_blob": "4f7bdf011ad52935eca0d76b164a9af7a6d108b3"
+    },
+    {
+      "family": "financial-analysis",
+      "number": 6,
+      "path": "tasks/financial-analysis/financial-analysis-6",
+      "instruction_git_blob": "6e7f35509164920723cb8af4803a730c5ce82393"
+    },
+    {
+      "family": "fix-security-bug",
+      "number": 1,
+      "path": "tasks/fix-security-bug/fix-security-bug-1",
+      "instruction_git_blob": "1bad370e22ed348f1c32f9fc8bb98aae18030262"
+    },
+    {
+      "family": "fix-security-bug",
+      "number": 2,
+      "path": "tasks/fix-security-bug/fix-security-bug-2",
+      "instruction_git_blob": "aef9859f5e15a4223ccc2615ceca775e35308af4"
+    },
+    {
+      "family": "fix-security-bug",
+      "number": 3,
+      "path": "tasks/fix-security-bug/fix-security-bug-3",
+      "instruction_git_blob": "74b8ecae3c022ad43dfc2365b11ee9c2f3f4fe19"
+    },
+    {
+      "family": "github-repo-analytics",
+      "number": 1,
+      "path": "tasks/github-repo-analytics/github-repo-analytics-1",
+      "instruction_git_blob": "3deb87f72646e71376cd3facbdca03f9f3cfec6a"
+    },
+    {
+      "family": "github-repo-analytics",
+      "number": 2,
+      "path": "tasks/github-repo-analytics/github-repo-analytics-2",
+      "instruction_git_blob": "8d313dfea6f7c3a039f77a2f1e1f0f549808dfb5"
+    },
+    {
+      "family": "github-repo-analytics",
+      "number": 3,
+      "path": "tasks/github-repo-analytics/github-repo-analytics-3",
+      "instruction_git_blob": "fa1f16b531d6fec033e379c659b97a23997320a9"
+    },
+    {
+      "family": "github-repo-analytics",
+      "number": 4,
+      "path": "tasks/github-repo-analytics/github-repo-analytics-4",
+      "instruction_git_blob": "9e876ffa1cdd487a3862108b4e7f2d21de9bc0df"
+    },
+    {
+      "family": "github-repo-analytics",
+      "number": 5,
+      "path": "tasks/github-repo-analytics/github-repo-analytics-5",
+      "instruction_git_blob": "662df2b718e07dd0312e42ca05194e0208bf7855"
+    },
+    {
+      "family": "nlp-paper-reproduction",
+      "number": 1,
+      "path": "tasks/nlp-paper-reproduction/nlp-paper-reproduction-1",
+      "instruction_git_blob": "590319181a02ae99268b1f31dd13a9cdcd8673fd"
+    },
+    {
+      "family": "nlp-paper-reproduction",
+      "number": 2,
+      "path": "tasks/nlp-paper-reproduction/nlp-paper-reproduction-2",
+      "instruction_git_blob": "bf71655acfe861777c2ac1a089e4d1523d501164"
+    },
+    {
+      "family": "nlp-paper-reproduction",
+      "number": 3,
+      "path": "tasks/nlp-paper-reproduction/nlp-paper-reproduction-3",
+      "instruction_git_blob": "ad361f626b0fdec57bd440b9ff638dd4b928c0e9"
+    },
+    {
+      "family": "offer-letter-generator",
+      "number": 1,
+      "path": "tasks/offer-letter-generator/offer-letter-generator-1",
+      "instruction_git_blob": "3942d1d24e3be6f7c286a9a1c387c4e5e6d3218a"
+    },
+    {
+      "family": "offer-letter-generator",
+      "number": 2,
+      "path": "tasks/offer-letter-generator/offer-letter-generator-2",
+      "instruction_git_blob": "3942d1d24e3be6f7c286a9a1c387c4e5e6d3218a"
+    },
+    {
+      "family": "offer-letter-generator",
+      "number": 3,
+      "path": "tasks/offer-letter-generator/offer-letter-generator-3",
+      "instruction_git_blob": "3942d1d24e3be6f7c286a9a1c387c4e5e6d3218a"
+    },
+    {
+      "family": "offer-letter-generator",
+      "number": 4,
+      "path": "tasks/offer-letter-generator/offer-letter-generator-4",
+      "instruction_git_blob": "3942d1d24e3be6f7c286a9a1c387c4e5e6d3218a"
+    },
+    {
+      "family": "offer-letter-generator",
+      "number": 5,
+      "path": "tasks/offer-letter-generator/offer-letter-generator-5",
+      "instruction_git_blob": "3942d1d24e3be6f7c286a9a1c387c4e5e6d3218a"
+    },
+    {
+      "family": "offer-letter-generator",
+      "number": 6,
+      "path": "tasks/offer-letter-generator/offer-letter-generator-6",
+      "instruction_git_blob": "ff149eaabdae8e354b01eea0f477f425b61c8419"
+    },
+    {
+      "family": "organize-messy-files",
+      "number": 1,
+      "path": "tasks/organize-messy-files/organize-messy-files-1",
+      "instruction_git_blob": "b25340f296fac22e40304b600ca823018bd53353"
+    },
+    {
+      "family": "organize-messy-files",
+      "number": 2,
+      "path": "tasks/organize-messy-files/organize-messy-files-2",
+      "instruction_git_blob": "b25340f296fac22e40304b600ca823018bd53353"
+    },
+    {
+      "family": "organize-messy-files",
+      "number": 3,
+      "path": "tasks/organize-messy-files/organize-messy-files-3",
+      "instruction_git_blob": "b25340f296fac22e40304b600ca823018bd53353"
+    },
+    {
+      "family": "organize-messy-files",
+      "number": 4,
+      "path": "tasks/organize-messy-files/organize-messy-files-4",
+      "instruction_git_blob": "b25340f296fac22e40304b600ca823018bd53353"
+    },
+    {
+      "family": "organize-messy-files",
+      "number": 5,
+      "path": "tasks/organize-messy-files/organize-messy-files-5",
+      "instruction_git_blob": "b25340f296fac22e40304b600ca823018bd53353"
+    },
+    {
+      "family": "organize-messy-files",
+      "number": 6,
+      "path": "tasks/organize-messy-files/organize-messy-files-6",
+      "instruction_git_blob": "a76259f713f6ff4b7b369e6596699d679d85b78b"
+    },
+    {
+      "family": "python-scala-translation",
+      "number": 1,
+      "path": "tasks/python-scala-translation/python-scala-translation-1",
+      "instruction_git_blob": "d2f0a2934640fc2ccf66fcb196ba667ef3d3666b"
+    },
+    {
+      "family": "python-scala-translation",
+      "number": 2,
+      "path": "tasks/python-scala-translation/python-scala-translation-2",
+      "instruction_git_blob": "9c9723737ba1d635d2e950ef9bb1820bb430a6c7"
+    },
+    {
+      "family": "schedule-planning",
+      "number": 1,
+      "path": "tasks/schedule-planning/schedule-planning-1",
+      "instruction_git_blob": "4489cd2c2ef503f9bd7d01b1a6bf77f5760184d2"
+    },
+    {
+      "family": "schedule-planning",
+      "number": 2,
+      "path": "tasks/schedule-planning/schedule-planning-2",
+      "instruction_git_blob": "4489cd2c2ef503f9bd7d01b1a6bf77f5760184d2"
+    },
+    {
+      "family": "schedule-planning",
+      "number": 3,
+      "path": "tasks/schedule-planning/schedule-planning-3",
+      "instruction_git_blob": "4489cd2c2ef503f9bd7d01b1a6bf77f5760184d2"
+    },
+    {
+      "family": "schedule-planning",
+      "number": 4,
+      "path": "tasks/schedule-planning/schedule-planning-4",
+      "instruction_git_blob": "4489cd2c2ef503f9bd7d01b1a6bf77f5760184d2"
+    },
+    {
+      "family": "schedule-planning",
+      "number": 5,
+      "path": "tasks/schedule-planning/schedule-planning-5",
+      "instruction_git_blob": "4489cd2c2ef503f9bd7d01b1a6bf77f5760184d2"
+    },
+    {
+      "family": "stock-data-visualization",
+      "number": 1,
+      "path": "tasks/stock-data-visualization/stock-data-visualization-1",
+      "instruction_git_blob": "f17952bd102851a12e1f79e1c4c1cf1ecbd90d08"
+    },
+    {
+      "family": "stock-data-visualization",
+      "number": 2,
+      "path": "tasks/stock-data-visualization/stock-data-visualization-2",
+      "instruction_git_blob": "7dcbd19f8fc00a261007c61c66305133d94fd63e"
+    },
+    {
+      "family": "stock-data-visualization",
+      "number": 3,
+      "path": "tasks/stock-data-visualization/stock-data-visualization-3",
+      "instruction_git_blob": "6e348272b3cb0fb7013379b57ce5974af21a4b49"
+    },
+    {
+      "family": "stock-data-visualization",
+      "number": 4,
+      "path": "tasks/stock-data-visualization/stock-data-visualization-4",
+      "instruction_git_blob": "f17952bd102851a12e1f79e1c4c1cf1ecbd90d08"
+    },
+    {
+      "family": "stock-data-visualization",
+      "number": 5,
+      "path": "tasks/stock-data-visualization/stock-data-visualization-5",
+      "instruction_git_blob": "7eb21cb1cc5ef64fe0e88f929d1414a376bf84ea"
+    },
+    {
+      "family": "temperature-simulation",
+      "number": 1,
+      "path": "tasks/temperature-simulation/temperature-simulation-1",
+      "instruction_git_blob": "83a70d7dd1d1f239c5ec5b1036b6996945511b81"
+    },
+    {
+      "family": "temperature-simulation",
+      "number": 2,
+      "path": "tasks/temperature-simulation/temperature-simulation-2",
+      "instruction_git_blob": "83a70d7dd1d1f239c5ec5b1036b6996945511b81"
+    },
+    {
+      "family": "temperature-simulation",
+      "number": 3,
+      "path": "tasks/temperature-simulation/temperature-simulation-3",
+      "instruction_git_blob": "83a70d7dd1d1f239c5ec5b1036b6996945511b81"
+    },
+    {
+      "family": "temperature-simulation",
+      "number": 4,
+      "path": "tasks/temperature-simulation/temperature-simulation-4",
+      "instruction_git_blob": "83a70d7dd1d1f239c5ec5b1036b6996945511b81"
+    },
+    {
+      "family": "temperature-simulation",
+      "number": 5,
+      "path": "tasks/temperature-simulation/temperature-simulation-5",
+      "instruction_git_blob": "83a70d7dd1d1f239c5ec5b1036b6996945511b81"
+    },
+    {
+      "family": "travel-planning",
+      "number": 1,
+      "path": "tasks/travel-planning/travel-planning-1",
+      "instruction_git_blob": "d20318296b0bbdac894f28b864c6d51f58bedb07"
+    },
+    {
+      "family": "travel-planning",
+      "number": 2,
+      "path": "tasks/travel-planning/travel-planning-2",
+      "instruction_git_blob": "67e0f7e67f09917e0679ac71f7860aaaaecaf9c2"
+    },
+    {
+      "family": "travel-planning",
+      "number": 3,
+      "path": "tasks/travel-planning/travel-planning-3",
+      "instruction_git_blob": "0f04f5db0b20c225a63c07b3a45ea334398dc735"
+    },
+    {
+      "family": "travel-planning",
+      "number": 4,
+      "path": "tasks/travel-planning/travel-planning-4",
+      "instruction_git_blob": "34a179cf65f547bf955dcaf0f2570f89c5f323de"
+    },
+    {
+      "family": "travel-planning",
+      "number": 5,
+      "path": "tasks/travel-planning/travel-planning-5",
+      "instruction_git_blob": "2ab2212b0d6632bacd074762bceaa06be6eb88e3"
+    },
+    {
+      "family": "video-object-counting",
+      "number": 1,
+      "path": "tasks/video-object-counting/video-object-counting-1",
+      "instruction_git_blob": "5aeaf18f2e0a1789e800f23aa06752cb7d63c3b0"
+    },
+    {
+      "family": "video-object-counting",
+      "number": 2,
+      "path": "tasks/video-object-counting/video-object-counting-2",
+      "instruction_git_blob": "cd14cea07729d087b133a7b82de144f201e629fc"
+    },
+    {
+      "family": "video-object-counting",
+      "number": 3,
+      "path": "tasks/video-object-counting/video-object-counting-3",
+      "instruction_git_blob": "b0502324a4d1b186c361f2e099b927c9d7a807c8"
+    },
+    {
+      "family": "video-object-counting",
+      "number": 4,
+      "path": "tasks/video-object-counting/video-object-counting-4",
+      "instruction_git_blob": "ba4693ab518b69e524ced32b9bd4d397b48e1846"
+    },
+    {
+      "family": "video-object-counting",
+      "number": 5,
+      "path": "tasks/video-object-counting/video-object-counting-5",
+      "instruction_git_blob": "cfaa7022ec3d0e3478d79aaf416f17d7a0d2de21"
+    },
+    {
+      "family": "weighted-gdp-calculation",
+      "number": 1,
+      "path": "tasks/weighted-gdp-calculation/weighted-gdp-calculation-1",
+      "instruction_git_blob": "5fa93a301d9716368b69673ded02a5b87fa33285"
+    },
+    {
+      "family": "weighted-gdp-calculation",
+      "number": 2,
+      "path": "tasks/weighted-gdp-calculation/weighted-gdp-calculation-2",
+      "instruction_git_blob": "7c59e6bf8e1dd9ee5a2d348ce1a16981361fffc2"
+    },
+    {
+      "family": "weighted-gdp-calculation",
+      "number": 3,
+      "path": "tasks/weighted-gdp-calculation/weighted-gdp-calculation-3",
+      "instruction_git_blob": "5fa93a301d9716368b69673ded02a5b87fa33285"
+    },
+    {
+      "family": "weighted-gdp-calculation",
+      "number": 4,
+      "path": "tasks/weighted-gdp-calculation/weighted-gdp-calculation-4",
+      "instruction_git_blob": "5fa93a301d9716368b69673ded02a5b87fa33285"
+    },
+    {
+      "family": "weighted-gdp-calculation",
+      "number": 5,
+      "path": "tasks/weighted-gdp-calculation/weighted-gdp-calculation-5",
+      "instruction_git_blob": "7c59e6bf8e1dd9ee5a2d348ce1a16981361fffc2"
+    },
+    {
+      "family": "weighted-gdp-calculation",
+      "number": 6,
+      "path": "tasks/weighted-gdp-calculation/weighted-gdp-calculation-6",
+      "instruction_git_blob": "ee9a4d8c1b43493df895dc3a3d481a6db86bbfae"
+    }
+  ]
+}
