@@ -243,7 +243,8 @@ def process_best_report(root):
     from .runner import ablation_jobs, cell_path
     root = Path(root)
     manifest = read_json(root / "run_manifest.json")
-    protocol = manifest["identity"]["protocol"]
+    from .common import latest_protocol
+    protocol = latest_protocol(manifest)
     rows, groups = [], {}
     # Rebuild the full training roster so a later `--stage test` plan cannot shrink it.
     for job in ablation_jobs(root, protocol, manifest["config_hash"], stage="train"):

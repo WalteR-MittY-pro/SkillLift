@@ -32,12 +32,20 @@ def prepare_run(root, protocol):
     resolved = ROOT / ".cache/revision2026/resolved-requirements.txt"
     identity["resolved_dependencies"] = digest(resolved.read_text()) if resolved.exists() else None
     manifest = root / "run_manifest.json"
-    if manifest.exists():
-        if read_json(manifest)["identity"] != identity:
-            raise ValueError("Run settings, model endpoint, source, or code changed. Use a new --run-dir.")
-    else:
+    if not manifest.exists():
         write_json(manifest, {"created_at": utc_now(), "identity": identity, "config_hash": digest(identity)})
-    return protocol, digest(identity)
+        return protocol, digest(identity)
+    # Resuming never refuses a run because code, protocol, dependencies or endpoints changed.
+    # The run keeps its original config_hash so finished cells stay finished; each change is
+    # only recorded (audit trail), and the newest settings are used from now on.
+    current = read_json(manifest)
+    latest = current.get("identity_latest", current["identity"])
+    if latest != identity:
+        changed = sorted(key for key in set(latest) | set(identity) if latest.get(key) != identity.get(key))
+        current.setdefault("identity_history", []).append({"recorded_at": utc_now(), "identity_hash": digest(identity), "changed": changed})
+        current["identity_latest"] = identity
+        write_json(manifest, current)
+    return protocol, current["config_hash"]
 
 
 def cell_path(root, benchmark, model, method, run, family):
@@ -197,8 +205,16 @@ def seal_evaluation_plan(root, jobs):
         raise ValueError("Duplicate logical evaluation cells in plan")
     path = Path(root) / "evaluation_manifest.json"
     planned = {"evaluations": evaluations, "plan_hash": digest(evaluations)}
-    if path.exists() and read_json(path) != planned:
-        raise ValueError("The sealed evaluation roster changed; use a new run directory")
+    if path.exists():
+        previous = read_json(path)
+        if previous.get("plan_hash") == planned["plan_hash"]:
+            return
+        # A changed plan (e.g. new protocol values on resume) replaces the roster; the old one is
+        # kept in the history file. Finished evaluations are matched by cell identity, not by plan.
+        from .common import append_event
+        append_event(Path(root) / "evaluation_manifest_history.jsonl",
+                     {"replaced_plan_hash": previous.get("plan_hash"), "new_plan_hash": planned["plan_hash"],
+                      "replaced_evaluations": len(previous.get("evaluations", [])), "new_evaluations": len(evaluations)})
     write_json(path, planned)
 
 

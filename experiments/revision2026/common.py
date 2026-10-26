@@ -97,6 +97,11 @@ def append_event(path, event):
         stream.write(json.dumps({"recorded_at": utc_now(), **event}, ensure_ascii=False) + "\n")
 
 
+def latest_protocol(manifest):
+    """Protocol currently in force for a run directory (the newest one recorded on resume)."""
+    return manifest.get("identity_latest", manifest["identity"])["protocol"]
+
+
 def require_frozen(marker):
     marker = Path(marker)
     value = read_json(marker)

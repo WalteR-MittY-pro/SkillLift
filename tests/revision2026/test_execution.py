@@ -19,13 +19,31 @@ def test_task_identifiers_cannot_collide_on_disk(tmp_path):
     assert evaluation_path(spec(tmp_path, "a%2Fb")) != evaluation_path(spec(tmp_path, "a/b"))
 
 
-def test_duplicate_evaluations_and_shrunken_rosters_are_rejected(tmp_path):
+def test_duplicate_evaluations_rejected_but_changed_rosters_resume_with_history(tmp_path):
     one, two = spec(tmp_path, "a/2"), spec(tmp_path, "a/3")
     with pytest.raises(ValueError, match="Duplicate"):
         seal_evaluation_plan(tmp_path, [one, one])
     seal_evaluation_plan(tmp_path, [one, two])
-    with pytest.raises(ValueError, match="roster changed"):
-        seal_evaluation_plan(tmp_path, [one])
+    seal_evaluation_plan(tmp_path, [one])  # changed plan on resume: accepted, not refused
+    assert len(json.loads((tmp_path / "evaluation_manifest.json").read_text())["evaluations"]) == 1
+    assert (tmp_path / "evaluation_manifest_history.jsonl").read_text().count("replaced_plan_hash") == 1
+
+
+def test_resume_accepts_changed_code_protocol_and_endpoint_and_keeps_config_hash(tmp_path, monkeypatch):
+    from experiments.revision2026 import runner
+    endpoints = {"glm": {"model": "GLM-5.1", "base_url": "https://a.example/v1"}}
+    monkeypatch.setattr(runner, "endpoint_identity", lambda model: endpoints[model])
+    protocol = load_protocol()
+    protocol["models"] = ["glm"]
+    _, first = runner.prepare_run(tmp_path, protocol)
+    changed = json.loads(json.dumps(protocol))
+    changed["retry"]["api_max_attempts"] = 12
+    endpoints["glm"] = {"model": "GLM-5.1", "base_url": "https://b.example/v1"}
+    monkeypatch.setattr(runner, "code_identity", lambda: "edited-code")
+    used, second = runner.prepare_run(tmp_path, changed)
+    assert second == first and used["retry"]["api_max_attempts"] == 12
+    manifest = json.loads((tmp_path / "run_manifest.json").read_text())
+    assert set(manifest["identity_history"][0]["changed"]) == {"driver_hash", "endpoints", "protocol"}
 
 
 def test_missing_selected_results_do_not_shrink_expected_denominator(tmp_path):

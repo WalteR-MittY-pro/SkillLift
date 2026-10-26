@@ -127,7 +127,8 @@ def main(argv=None):
         return
     if args.command == "report":
         from .statistics import cost_report, process_best_report, summarize
-        settings = read_json(args.run_dir / "run_manifest.json")["identity"]["protocol"]["statistics"]
+        from .common import latest_protocol
+        settings = latest_protocol(read_json(args.run_dir / "run_manifest.json"))["statistics"]
         output = {}
         if (args.run_dir / "evaluation_manifest.json").exists():
             rows = summarize(args.run_dir, settings)
