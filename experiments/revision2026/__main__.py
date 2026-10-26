@@ -84,7 +84,8 @@ def main(argv=None):
         p.add_argument("--protocol", type=Path)
         p.add_argument("--workers", type=int)
         p.add_argument("--stage", choices=["all", "train", "test"], default="all")
-        p.add_argument("--retry-errors", action="store_true")
+        p.add_argument("--retry-errors", action="store_true", help="Kept for compatibility; failed jobs are retried by default")
+        p.add_argument("--no-retry-errors", action="store_true", help="Stop if earlier failed jobs exist instead of retrying them")
         p.add_argument("--plan-only", action="store_true")
     p = sub.add_parser("worker", help="Internal process worker; normally launched by the batch runner")
     p.add_argument("spec", type=Path)
@@ -101,7 +102,8 @@ def main(argv=None):
     p.add_argument("--run-dir", type=Path, required=True)
     p.add_argument("--protocol", type=Path)
     p.add_argument("--workers", type=int)
-    p.add_argument("--retry-errors", action="store_true")
+    p.add_argument("--retry-errors", action="store_true", help="Kept for compatibility; failed jobs are retried by default")
+    p.add_argument("--no-retry-errors", action="store_true", help="Stop if earlier failed jobs exist instead of retrying them")
     p.add_argument("--plan-only", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "prepare":
@@ -202,7 +204,7 @@ def main(argv=None):
     if not args.plan_only:
         if args.workers is not None and args.workers < 1:
             raise ValueError("--workers must be positive")
-        run_jobs(jobs, args.run_dir, args.workers or protocol["workers"], retry_errors=args.retry_errors)
+        run_jobs(jobs, args.run_dir, args.workers or protocol["workers"], retry_errors=not args.no_retry_errors)
         if args.command != "pilot":
             from .statistics import summarize, cost_report
             if any(job["kind"] == "evaluate" for job in jobs):

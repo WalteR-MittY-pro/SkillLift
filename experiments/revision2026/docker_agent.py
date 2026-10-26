@@ -125,14 +125,25 @@ def run_solver(container, instruction, skill_dir, model, settings, output, ledge
             catalog.append({"name": meta["name"], "description": meta["description"], "path": f"/root/.claude/skills/{path.parent.name}/SKILL.md"})
     system = "Solve the user's task in the provided Linux environment. Use the tools to inspect inputs and create the requested artifacts. Available skills are listed below; read applicable SKILL.md files before using them. Do not search for hidden benchmark tests, reference solutions, or reward files.\n" + json.dumps(catalog, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": instruction}]
+    from .resilience import policy_from, retry_call
+    policy = policy_from({"retry": settings.get("retry", {})})
     began = time.monotonic()
+    excluded = 0.0  # time lost to transient API failures and backoff never counts against the solver budget
     status = "step_limit"
     for step in range(settings["max_steps"]):
-        if time.monotonic() - began > settings["timeout_seconds"]:
+        if time.monotonic() - began - excluded > settings["timeout_seconds"]:
             status = "solver_timeout"
             break
-        reply = client.chat.completions.create(model=ep["MODEL"], messages=messages, tools=TOOLS,
-                                               temperature=settings["temperature"], max_tokens=settings["max_output_tokens"])
+        call_started, last_attempt = time.monotonic(), {}
+
+        def request():
+            last_attempt["start"] = time.monotonic()
+            return client.chat.completions.create(model=ep["MODEL"], messages=messages, tools=TOOLS,
+                                                  temperature=settings["temperature"], max_tokens=settings["max_output_tokens"])
+
+        reply = retry_call(request, attempts=policy["api_max_attempts"], base=policy["api_base_seconds"], cap=policy["api_max_seconds"],
+                           describe="solver", log=lambda event: append_event(ledger, {**event, "step": step}))
+        excluded += last_attempt["start"] - call_started
         usage = reply.usage.model_dump() if reply.usage else None
         append_event(ledger, {"kind": "solver_usage", "step": step, "model": ep["MODEL"], "usage": usage,
                               "usage_available": usage is not None, "response_model": reply.model})
@@ -215,7 +226,10 @@ def evaluate(instance, skill_dir, model, settings, output, ledger, run_root):
                                      "solver_last_message": str(messages[-1].get("content", ""))[-12000:] if messages else ""}
     except Exception as exc:
         result["error_type"] = type(exc).__name__
-        result["error"] = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Execution failed; inspect local per-trial artifacts."
+        # Keep the error class and status so transient API failures can be retried; never a score.
+        status_code = getattr(exc, "status_code", None)
+        result["error"] = (str(exc) if isinstance(exc, (ValueError, RuntimeError))
+                           else f"{type(exc).__name__}{f' status={status_code}' if status_code else ''}: {str(exc)[:300]}")
     finally:
         for name in (solver, scorer):
             command(["docker", "rm", "-f", name], check=False, timeout=60)

@@ -33,3 +33,10 @@
 - `ablation.benchmarks = ["skillsbench"]`；GLM-5.1 只跑 `direct_oracle` 并对照论文 Table 2 SkillLift 75.1；DeepSeek-V4.1-Flash 跑 `skilllift` + `direct_oracle`，独立复测 2 次。SkillLearnBench 泛化恢复为 4 个方法。
 - 训练时记录每次有效 oracle 执行的分数，冻结时写入 `process_best`；`report` 输出 Table 2 口径的过程最好分，分母为完整计划，缺格只报覆盖率。
 - 测试 36 项通过（Python 3.12）。仍未运行 Docker、模型或真实任务。
+
+## 断点重试与续跑（2026-10-26）
+
+- 新增 `resilience.py`：暂时性错误分类、指数退避、journal（按请求内容 + 出现次序索引，fsync 追加，容忍崩溃时的半行）、带 journal 的 LLM 包装。
+- 求解器 API 调用、框架 LLM、SkillOpt LLM、训练 oracle 执行、最终复测、整个 job 均有重试；求解器重试等待不计入时限。
+- `run_jobs` 默认跳过已完成 job、自动重跑失败/中断 job；训练 cell 在固定 `work/` 目录运行，中断目录归档到 `attempts/`，重启时重放 journal。
+- 新增测试 20 项，共 56 项通过（Python 3.12），包括：连续 3 次以上 429/404 后成功、永久错误不重试、journal 半行恢复、LLM 重放不调用 API、oracle 重试与重启重放、Direct Oracle 崩溃后续跑不重复执行 oracle、已完成 job 不重启、失败 job 自动重启、独立复测重试。仍未运行 Docker、模型或真实任务；SkillLift 的完整重放需要在试跑中用"中途 kill 再重启"实测确认。

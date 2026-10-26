@@ -9,20 +9,25 @@ from types import SimpleNamespace
 from .common import append_event, endpoint, write_json
 
 
-def clients(model, ledger, roles=("rubricator", "skill_generator", "verifier")):
+def clients(model, ledger, roles=("rubricator", "skill_generator", "verifier"), *, protocol=None, journal=None):
+    """Framework LLM clients with long transient retries and journal replay after a restart."""
     from skilllift.llm_client import LLMClient
+    from .resilience import ResilientLLM, policy_from
     ep = endpoint(model)
-    return {role: LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=True,
-                           usage_callback=lambda event: append_event(ledger, {"kind": "framework_usage", **event}))
+    policy = policy_from(protocol)
+    log = lambda event: append_event(ledger, event)
+    return {role: ResilientLLM(LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=True,
+                                         usage_callback=lambda event: append_event(ledger, {"kind": "framework_usage", **event})),
+                               policy, journal, log)
             for role in roles}
 
 
-def run_skilllift(oracle, protocol, root, model, ledger):
+def run_skilllift(oracle, protocol, root, model, ledger, journal=None):
     from skilllift import SkillLiftPortfolioCoordinator
     from skilllift.coordinator import CoordinatorConfig
     from skilllift.portfolio import PortfolioStore, LLMRubricatorPlanner
     from skilllift_eval.runners.bounded_edits_skill_generator import BoundedEditsSkillGenerator
-    llms = clients(model, ledger)
+    llms = clients(model, ledger, protocol=protocol, journal=journal)
     config = protocol["skilllift"]
     result = SkillLiftPortfolioCoordinator(
         adapter=oracle, planner=LLMRubricatorPlanner(llms["rubricator"], max_input_chars=config["max_context_chars"]),
@@ -57,12 +62,18 @@ def _criterion_pass_fraction(feedback):
 
 
 def _ledger_tokens(ledger):
-    """Cumulative recorded usage at this moment; missing usage stays unknown, never zero."""
+    """Cumulative recorded usage at this moment; missing usage stays unknown, never zero.
+
+    Archived ledgers of interrupted attempts of the same cell are included, so totals count
+    every paid call once. Curve points produced while replaying a journal therefore carry the
+    pre-crash spend early; they are flagged with oracle_replayed_cumulative > 0."""
     totals = {"framework_tokens": 0, "oracle_tokens": 0, "records_without_usage": 0}
     path = Path(ledger)
-    if not path.is_file():
-        return totals
-    for line in path.read_text(encoding="utf-8").splitlines():
+    paths = [path] if path.is_file() else []
+    if path.parent.name == "work":
+        paths += sorted(path.parent.parent.glob("attempts/*/usage.jsonl"))
+    lines = [line for item in paths for line in item.read_text(encoding="utf-8").splitlines()]
+    for line in lines:
         if not line.strip():
             continue
         event = json.loads(line)
@@ -91,7 +102,7 @@ def _fit_payload(payload, limit):
     return json.dumps(payload, ensure_ascii=False), True
 
 
-def run_direct_oracle(oracle, protocol, root, model, ledger):
+def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
     """Direct Oracle ablation with the same oracle structure as SkillLift.
 
     SkillLift spends oracle rollouts only on the K candidates of each round (its inner
@@ -114,7 +125,8 @@ def run_direct_oracle(oracle, protocol, root, model, ledger):
     spec = oracle.reward_spec()
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    generator = BoundedEditsSkillGenerator(clients(model, ledger, ("skill_generator",))["skill_generator"], max_input_chars=config["max_context_chars"])
+    generator = BoundedEditsSkillGenerator(clients(model, ledger, ("skill_generator",), protocol=protocol, journal=journal)["skill_generator"],
+                                           max_input_chars=config["max_context_chars"])
     task = oracle.public_task(oracle.family)
     counters = {"oracle_rollouts": 0, "generator_calls": 0}
 
@@ -148,6 +160,7 @@ def run_direct_oracle(oracle, protocol, root, model, ledger):
         point = {"round_index": round_index, "champion_hash": champion.tree_hash, "champion_reward": champion_reward,
                  "champion_criterion_pass_fraction": champion_fraction, "accept_reason": accept_reason, "stop_reason": stop_reason,
                  "oracle_rollouts_cumulative": counters["oracle_rollouts"], "generator_calls_cumulative": counters["generator_calls"],
+                 "oracle_replayed_cumulative": getattr(oracle, "replayed", 0),
                  **_ledger_tokens(ledger), **(extra or {})}
         curve.append(point)
         write_json(root / "curve.json", curve)
@@ -242,7 +255,27 @@ def skillopt_config(protocol, root, seed_file, ep, run_index):
     return cfg
 
 
-def run_skillopt(oracle, protocol, root, model, ledger, run_index):
+def _harden_skillopt(protocol, ledger):
+    """Add transient retries around the official SkillOpt OpenAI-compatible calls (runtime wrapper, source untouched).
+    SkillOpt's own LLM calls are not journaled, so an interrupted SkillOpt cell re-optimizes; identical seed-skill
+    oracle executions are still replayed from the cell journal."""
+    from skillopt.model import openai_compatible_backend as backend
+    from .resilience import policy_from, retry_call
+    policy = policy_from(protocol)
+    for name in ("chat_optimizer", "chat_target", "chat_optimizer_messages", "chat_target_messages"):
+        original = getattr(backend, name, None)
+        if original is None or getattr(original, "_revision_retry", False):
+            continue
+
+        def wrapped(*args, _original=original, _name=name, **kwargs):
+            return retry_call(lambda: _original(*args, **kwargs), attempts=policy["api_max_attempts"], base=policy["api_base_seconds"],
+                              cap=policy["api_max_seconds"], describe=f"skillopt:{_name}", log=lambda event: append_event(ledger, event))
+
+        wrapped._revision_retry = True
+        setattr(backend, name, wrapped)
+
+
+def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None):
     from skillopt.engine.trainer import ReflACTTrainer
     from skillopt.envs.base import EnvAdapter
     from skillopt.model import configure_openai_compatible, get_token_summary, reset_token_tracker
@@ -294,6 +327,7 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index):
                              "fail_reason": json.dumps(oracle.last_feedback, ensure_ascii=False), "n_turns": len(conversation)})
             return rows
 
+    _harden_skillopt(protocol, ledger)
     reset_token_tracker()
     try:
         ReflACTTrainer(cfg, Adapter()).train()

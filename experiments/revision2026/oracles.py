@@ -121,17 +121,20 @@ def checked_native_result(evaluation):
     if any(name in kind for name in allowed):
         return evaluation
     from skilllift.coordinator import CandidateEvaluation
-    return CandidateEvaluation.infrastructure_failure("Native result contains a non-budget execution error; inspect the original trial result")
+    return CandidateEvaluation.infrastructure_failure(f"Native result contains a non-budget execution error ({kind[:300]}); inspect the original trial result")
 
 
 class TrainingOracle:
-    def __init__(self, *, benchmark, family, model, seed, protocol, root, ledger, native=None, instance=None):
+    def __init__(self, *, benchmark, family, model, seed, protocol, root, ledger, native=None, instance=None, journal=None):
+        from .resilience import policy_from
         self.benchmark, self.family, self.model = benchmark, family, model
         self.seed, self.protocol, self.root, self.ledger = Path(seed), protocol, Path(root), Path(ledger)
-        self.native, self.instance = native, instance
+        self.native, self.instance, self.journal = native, instance, journal
+        self.policy = policy_from(protocol)
         self.last_feedback = {}
         self.last_conversation = []
-        self.calls = 0
+        self.calls = 0      # logical oracle executions consumed by the optimizer (replayed ones included)
+        self.replayed = 0   # of which answered from the cell journal after a restart
         self.valid_rewards = []  # (trial phase, reward) of every valid training execution
 
     def public_task(self, task_id):
@@ -158,23 +161,60 @@ class TrainingOracle:
         return None
 
     def evaluate(self, task_id, portfolio, trial):
+        """One logical oracle execution: journal replay, else live with transient retries."""
+        import dataclasses
+        import time
         from skilllift.coordinator import CandidateEvaluation
+        from .resilience import backoff_seconds, is_transient, request_key
         if task_id != self.family:
             raise ValueError("Unexpected training task")
         self.calls += 1
+        phase = getattr(trial, "phase", None)
+        key = request_key("oracle", self.benchmark, self.family, self.model, portfolio.tree_hash, phase)
+        if self.journal is not None:
+            hit, value = self.journal.lookup(key)
+            if hit:
+                self.replayed += 1
+                self.last_feedback, self.last_conversation = value["feedback"], value["conversation"]
+                result = CandidateEvaluation.from_dict(value["evaluation"])
+                self.valid_rewards.append((phase, float(result.reward)))
+                append_event(self.ledger, {"kind": "oracle_replayed_from_journal", "phase": phase, "skill_hash": portfolio.tree_hash})
+                return result
+        limit = int(self.policy["oracle_max_attempts"])
+        for attempt in range(limit):
+            current = trial
+            if attempt and dataclasses.is_dataclass(trial):
+                current = dataclasses.replace(trial, trial_id=f"{trial.trial_id}-r{attempt}")
+            result = self._execute(task_id, portfolio, current)
+            if result.is_valid or attempt + 1 >= limit or not is_transient(result.infrastructure_error or ""):
+                break
+            delay = backoff_seconds(attempt, self.policy["oracle_base_seconds"], self.policy["oracle_max_seconds"])
+            append_event(self.ledger, {"kind": "transient_retry", "what": "oracle", "phase": phase, "attempt": attempt + 1,
+                                       "error": str(result.infrastructure_error)[:300], "sleep_seconds": round(delay, 1)})
+            time.sleep(delay)
+        if result.is_valid:
+            self.valid_rewards.append((phase, float(result.reward)))
+            if self.journal is not None:
+                self.journal.record(key, {"evaluation": result.to_dict(), "feedback": self.last_feedback,
+                                          "conversation": self.last_conversation})
+        elif self.journal is not None:
+            self.journal.release(key)
+        return result
+
+    def _execute(self, task_id, portfolio, trial):
+        from skilllift.coordinator import CandidateEvaluation
         if self.instance:
             from .docker_agent import evaluate
             if self.instance.number != 1:
                 raise ValueError("Held-out instance passed to optimizer")
             folder = self.root / "oracle" / f"{self.calls:05d}-{uuid.uuid4().hex[:8]}"
-            result = evaluate(self.instance, portfolio.root, self.model, self.protocol["solver"], folder, self.ledger, self.root)
+            result = evaluate(self.instance, portfolio.root, self.model, {**self.protocol["solver"], "retry": self.policy}, folder, self.ledger, self.root)
             self.last_conversation = public_conversation(folder)
             self.last_feedback = result.get("public_feedback", {"status": result["status"], "error_type": result.get("error_type")})
             self.last_feedback["solver_conversation"] = json.dumps(self.last_conversation, ensure_ascii=False)[-60000:]
             self.last_feedback["oracle_criterion_outcomes"] = verifier_diagnostics(folder)
             if result["status"] != "OK":
                 return CandidateEvaluation.infrastructure_failure(result.get("error", "Oracle failed"))
-            self.valid_rewards.append((getattr(trial, "phase", None), float(result["reward"])))
             return CandidateEvaluation.valid(result["reward"], result_hash=digest(result), artifact_ref=str(folder / "result.json"), usage_ref=str(self.ledger))
         result = checked_native_result(self.native.evaluate(task_id, portfolio, trial))
         trial_root = execution_root(result.artifact_ref) if result.artifact_ref else self.root / "unavailable-public-trace"
@@ -186,8 +226,6 @@ class TrainingOracle:
         append_event(self.ledger, {"kind": "native_oracle_rollout", "phase": "training",
                                   "trial": trial.to_dict() if hasattr(trial, "to_dict") else vars(trial),
                                   "result": result.to_dict(), "feedback_source": "solver artifacts only"})
-        if result.is_valid:
-            self.valid_rewards.append((getattr(trial, "phase", None), float(result.reward)))
         return result
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -119,7 +120,16 @@ def train_cell(spec):
         if frozen["config_hash"] != spec["config_hash"]:
             raise ValueError("Frozen cell configuration mismatch")
         return
-    attempt = cell / "attempts" / uuid.uuid4().hex
+    # The optimizer always works in the same absolute directory so that prompts that mention
+    # paths are byte-identical after a restart (journal replay). An interrupted workspace is
+    # archived, never deleted or reused as state.
+    attempt = cell / "work"
+    if attempt.exists():
+        archive = cell / "attempts" / uuid.uuid4().hex
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        attempt.replace(archive)
+        write_json(archive / "ARCHIVED_FROM.json", {"original_path": str(attempt), "archived_at": utc_now(),
+                                                    "reason": "interrupted or failed training attempt; journal entries may reference original_path"})
     attempt.mkdir(parents=True)
     ledger = attempt / "usage.jsonl"
     native, instance = None, None
@@ -144,10 +154,14 @@ def train_cell(spec):
     if spec["method"] in {"no_skill", "human_written", "llm_written"}:
         freeze_cell(seed, cell, spec, {"static": True, "source_hash": tree_hash(seed)})
         return
+    from .resilience import Journal
+    # The journal survives attempts: a restarted cell replays completed LLM responses and
+    # valid oracle executions in order instead of paying for them again.
+    journal = Journal(cell / "journal" / "training.jsonl")
     oracle = TrainingOracle(benchmark=spec["benchmark"], family=spec["family"], model=spec["model"], seed=seed,
-                            protocol=spec["protocol"], root=attempt, ledger=ledger, native=native, instance=instance)
+                            protocol=spec["protocol"], root=attempt, ledger=ledger, native=native, instance=instance, journal=journal)
     initial_hash = tree_hash(seed)
-    kwargs = dict(oracle=oracle, protocol=spec["protocol"], root=attempt, model=spec["model"], ledger=ledger)
+    kwargs = dict(oracle=oracle, protocol=spec["protocol"], root=attempt, model=spec["model"], ledger=ledger, journal=journal)
     if spec["method"] == "skilllift":
         winner, details = run_skilllift(**kwargs)
     elif spec["method"] == "direct_oracle":
@@ -161,6 +175,8 @@ def train_cell(spec):
         raise ValueError("Unsupported optimization method: " + spec["method"])
     from .oracles import process_best
     freeze_cell(winner, cell, spec, {**details, "initial_hash": initial_hash, "oracle_rollouts": oracle.calls,
+                                     "oracle_rollouts_replayed_from_journal": oracle.replayed,
+                                     "journal": {"hits": journal.hits, "misses": journal.misses},
                                      "process_best": process_best(oracle.valid_rewards), "attempt": str(attempt)})
 
 
@@ -201,22 +217,32 @@ def evaluate_cell(spec):
             raise ValueError("Evaluation resume identity mismatch")
         if record["status"] == "OK":
             return
-    attempt = location / "attempts" / uuid.uuid4().hex
-    ledger = attempt.parent / (attempt.name + ".usage.jsonl")
-    if spec["benchmark"] == "skilllearnbench":
-        from .docker_agent import evaluate
-        instance = Instance(spec["family"], spec["instance"], Path(spec["task_path"]))
-        result = evaluate(instance, None if spec["method"] == "no_skill" else cell / "skills", spec["model"], spec["protocol"]["solver"], attempt, ledger, Path(spec["root"]))
-    else:
-        from .oracles import native_adapter, checked_native_result
-        from skilllift.coordinator import TrialSpec
-        from skilllift.portfolio import PortfolioRef
-        adapter = native_adapter(spec["benchmark"], spec["family"], spec["model"], attempt, spec["protocol"])
-        portfolio = PortfolioRef.from_directory(task_id=spec["family"], root=cell / "skills", config_hash=spec["config_hash"])
-        evaluation = checked_native_result(adapter.evaluate(spec["family"], portfolio, TrialSpec("independent-" + uuid.uuid4().hex, "independent_final", 0, final_index=spec["repeat"])))
-        result = {"status": "OK" if evaluation.is_valid else "ERROR", "reward": evaluation.reward,
-                  "error": evaluation.infrastructure_error, "native_result": evaluation.to_dict(), "finished_at": utc_now()}
-        write_json(attempt / "result.json", result)
+    from .resilience import backoff_seconds, is_transient, policy_from
+    import time
+    policy = policy_from(spec["protocol"])
+    for retry in range(int(policy["oracle_max_attempts"])):
+        # Every physical attempt keeps its own directory; only the final outcome is selected.
+        attempt = location / "attempts" / uuid.uuid4().hex
+        ledger = attempt.parent / (attempt.name + ".usage.jsonl")
+        if spec["benchmark"] == "skilllearnbench":
+            from .docker_agent import evaluate
+            instance = Instance(spec["family"], spec["instance"], Path(spec["task_path"]))
+            result = evaluate(instance, None if spec["method"] == "no_skill" else cell / "skills", spec["model"],
+                              {**spec["protocol"]["solver"], "retry": policy}, attempt, ledger, Path(spec["root"]))
+        else:
+            from .oracles import native_adapter, checked_native_result
+            from skilllift.coordinator import TrialSpec
+            from skilllift.portfolio import PortfolioRef
+            adapter = native_adapter(spec["benchmark"], spec["family"], spec["model"], attempt, spec["protocol"])
+            portfolio = PortfolioRef.from_directory(task_id=spec["family"], root=cell / "skills", config_hash=spec["config_hash"])
+            evaluation = checked_native_result(adapter.evaluate(spec["family"], portfolio, TrialSpec("independent-" + uuid.uuid4().hex, "independent_final", 0, final_index=spec["repeat"])))
+            result = {"status": "OK" if evaluation.is_valid else "ERROR", "reward": evaluation.reward,
+                      "error": evaluation.infrastructure_error, "native_result": evaluation.to_dict(), "finished_at": utc_now()}
+            write_json(attempt / "result.json", result)
+        if result["status"] == "OK" or retry + 1 >= int(policy["oracle_max_attempts"]) or not is_transient(str(result.get("error") or "")):
+            break
+        time.sleep(backoff_seconds(retry, policy["oracle_base_seconds"], policy["oracle_max_seconds"]))
+    result = {**result, "physical_attempts": retry + 1}
     record = {**result, "benchmark": spec["benchmark"], "model_label": spec["model"], "execution_model_id": endpoint_identity(spec["model"])["model"], "method": spec["method"],
               "family": spec["family"], "task_id": spec["task_id"], "evolution_run": spec["run"], "repeat": spec["repeat"],
               "phase": spec["phase"], "config_hash": spec["config_hash"], "skill_hash": frozen["skill_hash"],
@@ -245,11 +271,36 @@ def worker(spec_file):
         write_json(spec_file.with_suffix(".status.json"), {"status": "complete", "finished_at": utc_now()})
 
 
-def run_jobs(jobs, root, workers, *, retry_errors=False):
+def job_done(spec):
+    """True only when the job's durable artifact exists and matches this configuration."""
+    try:
+        if spec["kind"] == "train":
+            marker = cell_path(spec["root"], spec["benchmark"], spec["model"], spec["method"], spec["run"], spec["family"]) / "frozen.json"
+            return marker.exists() and require_frozen(marker)["config_hash"] == spec["config_hash"]
+        if spec["kind"] == "evaluate":
+            selected = evaluation_path(spec) / "selected.json"
+            if not selected.exists():
+                return False
+            record = read_json(selected)
+            return record.get("status") == "OK" and record.get("cell_identity") == evaluation_identity(spec) and record.get("config_hash") == spec["config_hash"]
+    except (ValueError, KeyError, FileNotFoundError):
+        return False
+    return False
+
+
+def run_jobs(jobs, root, workers, *, retry_errors=True):
+    """Resumable batch execution.
+
+    Restarting the same command continues where it stopped: jobs whose durable result
+    exists are skipped, interrupted or failed jobs are relaunched (training cells replay
+    their journal), and every earlier attempt stays on disk. A failing job is relaunched
+    up to retry.job_max_attempts times within one invocation before the phase stops."""
+    import time
+    from .resilience import policy_from
     root = Path(root)
     seal_evaluation_plan(root, jobs)
-    queue = []
-    blocked = []
+    queue, blocked, skipped = [], [], 0
+    policy = policy_from(jobs[0]["protocol"] if jobs else {})
     for spec in jobs:
         key = digest(spec)
         path = root / "jobs" / (key + ".json")
@@ -257,19 +308,30 @@ def run_jobs(jobs, root, workers, *, retry_errors=False):
         if spec.get("blocked_reason"):
             blocked.append({"cell": evaluation_identity(spec), "reason": spec["blocked_reason"]})
             continue
+        if job_done(spec):
+            skipped += 1
+            continue
         status = path.with_suffix(".status.json")
         if status.exists() and read_json(status).get("status") == "error" and not retry_errors:
-            raise ValueError("Previous errors exist. Inspect them and use --retry-errors to make fresh attempts.")
+            raise ValueError("Previous errors exist and --no-retry-errors was given. Inspect them or rerun without that flag.")
         queue.append(path)
     write_json(root / "blocked_jobs.json", blocked)
+    print(json.dumps({"already_complete_skipped": skipped, "to_run": len(queue), "blocked": len(blocked)}), flush=True)
 
     def launch(path):
-        with path.with_suffix(".stdout.log").open("a") as stdout, path.with_suffix(".stderr.log").open("a") as stderr:
-            stdout.write(f"\nLauncher attempt {utc_now()}\n")
-            stdout.flush()
-            result = subprocess.run([sys.executable, "-m", "experiments.revision2026", "worker", str(path)], cwd=ROOT, stdout=stdout, stderr=stderr)
         job = read_json(path)
-        print(f"{job['kind']} {job['benchmark']}/{job['model']}/{job['method']}/{job['family']} run={job['run']}: {'OK' if result.returncode == 0 else 'ERROR'}", flush=True)
+        label = f"{job['kind']} {job['benchmark']}/{job['model']}/{job['method']}/{job['family']} run={job['run']}"
+        for relaunch in range(int(policy["job_max_attempts"])):
+            with path.with_suffix(".stdout.log").open("a") as stdout, path.with_suffix(".stderr.log").open("a") as stderr:
+                stdout.write(f"\nLauncher attempt {relaunch + 1} {utc_now()}\n")
+                stdout.flush()
+                result = subprocess.run([sys.executable, "-m", "experiments.revision2026", "worker", str(path)], cwd=ROOT, stdout=stdout, stderr=stderr)
+            if result.returncode == 0:
+                print(f"{label}: OK", flush=True)
+                return 0
+            print(f"{label}: ERROR (launch {relaunch + 1}/{policy['job_max_attempts']})", flush=True)
+            if relaunch + 1 < int(policy["job_max_attempts"]):
+                time.sleep(policy["job_base_seconds"] * 2 ** relaunch)
         return result.returncode
 
     # Train all cells before any final evaluation. No test result can feed optimization.
@@ -278,4 +340,5 @@ def run_jobs(jobs, root, workers, *, retry_errors=False):
         with ThreadPoolExecutor(max_workers=workers) as pool:
             outcomes = list(pool.map(launch, phase))
         if any(outcomes):
-            raise RuntimeError(f"{kind} phase has {sum(code != 0 for code in outcomes)} failed jobs; inspect {root / 'jobs'}. Subsequent phases were not started.")
+            raise RuntimeError(f"{kind} phase has {sum(code != 0 for code in outcomes)} failed jobs after retries; inspect {root / 'jobs'}. "
+                               "Completed results are kept; rerun the same command to resume. Subsequent phases were not started.")

@@ -98,7 +98,7 @@ $PY -m experiments.revision2026 report --run-dir runs/revision2026/ablation
 
 **生成器收到的反馈**：当前 champion 的分数、求解状态、执行轨迹（超长时从最早部分截断，总量受 `max_feedback_chars` 限制）、最后回复、逐项测试通过/失败；上一轮已执行候选的分数、逐项结果、最后回复片段和补丁片段。不提供测试源码、断言细节、参考答案、模型 thought 或任何测试实例信息。这比 SkillLift 生成器多了逐项测试结果，论文中需注明。
 
-**逐轮曲线**：每个 cell 的 `attempts/<id>/curve.json` 记录每轮 champion 分数、累计 oracle 次数、累计生成器调用和累计 token，用于审稿人 4 要求的性能–成本对比。
+**逐轮曲线**：每个 cell 的 `work/curve.json` 记录每轮 champion 分数、累计 oracle 次数、累计生成器调用和累计 token，用于审稿人 4 要求的性能–成本对比。
 
 ## 5. 补齐 Table 2 的统计数据
 
@@ -143,19 +143,23 @@ $PY -m experiments.revision2026 table2-rebuild \
 
 ## 6. 一次启动、续跑与结果
 
-准备好前述依赖、素材和配置后，可以一次运行三条流程：
+**API 中断自动重试。** 429、404、408、409、425、5xx、连接重置和超时视为暂时性错误：
 
-```bash
-# 完整新36项表；需要旧模型与WRITER接口。旧归档审计可同时进行。
-LEGACY_ARCHIVE=~/data/expirment WORKERS=4 \
-  bash experiments/revision2026/run_all.sh rebuild
+| 层级 | 位置 | 最多尝试 | 退避 |
+|---|---|---|---|
+| 单次 API 调用 | 求解器、SkillLift/Direct Oracle 的 LLM、SkillOpt 的 LLM | 8 次（框架 LLM 另有内层 4 次） | 5 秒起指数退避，上限 300 秒，带抖动；遵守 Retry-After |
+| 单次 oracle 执行 | 训练中的每次执行、最终独立复测 | 6 次，每次新目录 | 30 秒起，上限 900 秒 |
+| 整个 job | 进程异常退出时自动重启该 job | 3 次 | 60 秒起 |
 
-# 或：优先复测可恢复技能。缺资产/缺基线的行仍会明确保留未完成状态。
-LEGACY_ARCHIVE=~/data/expirment WORKERS=4 \
-  bash experiments/revision2026/run_all.sh repair
-```
+400、401、403、413、422、1210/1301、内容过滤、上下文超长不会重试，直接报错。失败的执行从不记为 0 分。求解器因 API 重试等待的时间不计入求解时限。参数在 `protocol.json` 的 `retry`。
 
-恢复时重跑同一命令。已完成 family/run 的技能与评测按哈希和完整 cell identity 复用；未完成训练使用新 attempt 从头开始，避免旧 coordinator 精修状态恢复问题。失败原因解决后，可单独执行相应命令并加 `--retry-errors`。所有尝试保留，成本包含失败尝试。
+**程序中断后续跑。** 直接重跑同一条命令：
+
+- 已完成的 job（有 `frozen.json` 或状态为 OK 的 `selected.json`）直接跳过，不再执行。
+- 中断或失败的 job 自动重新运行（默认行为；加 `--no-retry-errors` 才会改为停下）。
+- 训练 cell 的每个已完成 LLM 回复和有效 oracle 执行都实时写入 `<cell>/journal/training.jsonl`（fsync）。重启后同样的请求按原顺序从 journal 返回，优化过程重放到中断点再继续，已执行的 oracle 不会再跑。SkillOpt 的 LLM 调用不在 journal 中，中断的 SkillOpt cell 会重新优化，但相同技能的执行仍会重放。
+- 中断时的工作目录整体移到 `<cell>/attempts/<id>/`，所有日志和产物都保留；token/成本统计包含全部尝试。
+- 不要在同一个 run-dir 中途改代码、协议或端点；身份校验会拒绝续跑。
 
 `--stage train` / `--stage test` 可拆开执行；`--plan-only` 只保存计划，不调用模型或 Docker，但仍需要已准备的数据和对应配置身份。不能在同一 run-dir 修改协议、模型路由、依赖或代码。需要改变时，使用新目录。
 
@@ -168,7 +172,7 @@ $PY -m experiments.revision2026 status --run-dir runs/revision2026/generalizatio
 
 各 run 的 `report/` 包含 `overall_statistics.csv`、`paired_comparisons.csv`、`cost_by_method.csv`、`cost_records.csv` 和 JSON 明细。训练/最终执行成本分开，SkillOpt `_total` 不与分阶段统计重复相加；缺失费用为未知，不能写成免费。GPT-6-SOL 子 agent 初始技能生成用量没有接口可核查，因此单独注明未计入，不编造数值。
 
-默认参数在 `protocol.json`：三个完整 run，泛化每 run/实例一次最终执行，消融和旧表每 run/任务三次最终执行。SkillLift 三轮、每轮三候选、Mode A/B 各两次。全量旧表重跑明显比恢复复测昂贵；**两天是耗时目标，尚无本机实测保证**。先看 pilot 的时间、内存和 token，再按 Docker Desktop 资源调整 `--workers`，不要为达到时限事后挑题。
+默认参数在 `protocol.json`：1 个完整 run；泛化每个测试实例执行一次；消融中 DeepSeek 两组每题独立复测两次，GLM 只用过程最好分对照论文；旧表重建每任务三次。SkillLift 三轮、每轮三候选、Mode A/B 各两次。全量旧表重跑明显比恢复复测昂贵；**两天是耗时目标，尚无本机实测保证**。先看 pilot 的时间、内存和 token，再按 Docker Desktop 资源调整 `--workers`，不要为达到时限事后挑题。
 
 ## 7. 已做与尚未做的验证
 

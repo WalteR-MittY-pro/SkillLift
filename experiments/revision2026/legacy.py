@@ -136,7 +136,7 @@ def write_seed(spec):
                        "scope": "Fresh Table2 rebuilding only; the SkillLearnBench GPT-6-SOL assets are already frozen and are not regenerated."})
 
 
-def run_coevo(oracle, protocol, root, model, ledger):
+def run_coevo(oracle, protocol, root, model, ledger, journal=None):
     """Reuse the repository's existing native CoEvoSkills implementation."""
     from .sources import source_path
     from .oracles import native_adapter

@@ -112,7 +112,7 @@ def _direct_oracle_harness(tmp_path, monkeypatch, outcomes, *, max_rounds=3, wid
 
     monkeypatch.setattr(bounded_edits_skill_generator, "BoundedEditsSkillGenerator", Generator)
     # Only the skill generator may exist; requesting a rubricator/verifier would KeyError.
-    monkeypatch.setattr(module, "clients", lambda model, ledger, roles: {role: object() for role in roles if role == "skill_generator"} if roles == ("skill_generator",) else pytest.fail("rubric roles requested"))
+    monkeypatch.setattr(module, "clients", lambda model, ledger, roles, **kwargs: {role: object() for role in roles if role == "skill_generator"} if roles == ("skill_generator",) else pytest.fail("rubric roles requested"))
     protocol = load_protocol()
     protocol["skilllift"].update(max_rounds=max_rounds, max_candidates_per_round=width)
     winner, details = module.run_direct_oracle(Oracle(), protocol, tmp_path / "run", "glm", tmp_path / "usage.jsonl")
