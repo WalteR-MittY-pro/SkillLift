@@ -1,5 +1,7 @@
 # 统一启动与断点续跑
 
+**当前优先先跑 SkillLearnBench：请使用 [SkillLearnBench 专用执行手册](SKILLLEARNBENCH_RUNBOOK.md)。本页的 `supplementary` 会同时启动泛化和消融，适用于需要同时运行两项实验的情况。**
+
 以下命令在 WSL 内、仓库根目录执行。Windows Docker Desktop 已运行，并已开启对应 WSL 发行版的集成。此页是当前重试、并发和续跑规则。
 
 ## 第一次准备
