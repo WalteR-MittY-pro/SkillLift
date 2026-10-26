@@ -27,3 +27,9 @@
 - `run_direct_oracle` 改为与 SkillLift 相同的 oracle 结构：每轮 K 个候选、每个 1 次修改、1 次 oracle；先生成全部候选再执行；同样的接受、基础设施重试和停止规则；分数相同时用 oracle 逐项通过比例做 tie-break；记录逐轮曲线。
 - protocol：`evolution_runs` 1；SkillLearnBench 方法为 no_skill / llm_written / skillopt / skilllift / direct_oracle；原生 SkillsBench/WildClaw `ablation` 禁用（`run_all.sh` 不再调用）。
 - 新增/更新测试：结构与调用顺序、10 次上限、tie-break、同候选重试、anchor 直接终止、反馈截断、`ablation` 命令禁用、计划规模。本机 Python 3.12 下 `tests/revision2026` 共 34 项通过。仍未运行 Docker、模型或真实任务。
+
+## 消融改回 SkillsBench（2026-10-26，作者决定）
+
+- `ablation.benchmarks = ["skillsbench"]`；GLM-5.1 只跑 `direct_oracle` 并对照论文 Table 2 SkillLift 75.1；DeepSeek-V4.1-Flash 跑 `skilllift` + `direct_oracle`，独立复测 2 次。SkillLearnBench 泛化恢复为 4 个方法。
+- 训练时记录每次有效 oracle 执行的分数，冻结时写入 `process_best`；`report` 输出 Table 2 口径的过程最好分，分母为完整计划，缺格只报覆盖率。
+- 测试 36 项通过（Python 3.12）。仍未运行 Docker、模型或真实任务。

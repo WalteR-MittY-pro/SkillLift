@@ -163,10 +163,33 @@ def test_direct_oracle_anchor_terminal_spends_one_rollout(tmp_path, monkeypatch)
     assert [event[0] for event in timeline] == ["oracle"]
 
 
-def test_native_ablation_command_is_disabled_by_protocol():
-    from experiments.revision2026.__main__ import main
-    with pytest.raises(ValueError, match="generalization"):
-        main(["ablation", "--run-dir", "unused", "--plan-only"])
+def test_process_best_separates_search_from_skilllift_internal_finals():
+    from experiments.revision2026.oracles import process_best
+    assert process_best([("anchor", 0.2), ("candidate", 0.6), ("final", 1.0)]) == {
+        "best_excluding_internal_final": 0.6, "best_including_internal_final": 1.0, "valid_executions": 3}
+    assert process_best([])["best_including_internal_final"] is None
+
+
+def test_process_best_report_keeps_full_denominator_and_published_row(tmp_path, monkeypatch):
+    from experiments.revision2026 import oracles
+    from experiments.revision2026.runner import cell_path
+    from experiments.revision2026.statistics import process_best_report
+    monkeypatch.setattr(oracles, "native_task_ids", lambda benchmark: ["t1", "t2"])
+    protocol = load_protocol()
+    protocol["models"] = ["glm"]
+    write_json(tmp_path / "run_manifest.json", {"identity": {"protocol": protocol}, "config_hash": "cfg"})
+    marker = cell_path(tmp_path, "skillsbench", "glm", "direct_oracle", 0, "t1") / "frozen.json"
+    write_json(marker, {"training": {"process_best": {"best_excluding_internal_final": 0.5, "best_including_internal_final": 0.5}}})
+    rows = process_best_report(tmp_path)
+    new = next(row for row in rows if row["source"] == "this run")
+    assert new["expected"] == 2 and new["observed"] == 1 and new["status"] == "incomplete"
+    assert new["mean_best_including_internal_final_percent"] is None
+    published = next(row for row in rows if row["status"] == "published")
+    assert published["method"] == "skilllift" and published["mean_best_including_internal_final_percent"] == 75.1
+    marker2 = cell_path(tmp_path, "skillsbench", "glm", "direct_oracle", 0, "t2") / "frozen.json"
+    write_json(marker2, {"training": {"process_best": {"best_excluding_internal_final": 1.0, "best_including_internal_final": 1.0}}})
+    new = next(row for row in process_best_report(tmp_path) if row["source"] == "this run")
+    assert new["status"] == "complete" and new["mean_best_including_internal_final_percent"] == 75.0
 
 
 def test_skillopt_configuration_never_serializes_role_secrets(tmp_path):

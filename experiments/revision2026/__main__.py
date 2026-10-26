@@ -124,11 +124,16 @@ def main(argv=None):
             print(json.dumps({"verified_assets": len(result["assets"]), "unresolved": len(result["unresolved"]), "plan": str(args.output / "repair_plan.json")}, indent=2))
         return
     if args.command == "report":
-        from .statistics import cost_report, summarize
+        from .statistics import cost_report, process_best_report, summarize
         settings = read_json(args.run_dir / "run_manifest.json")["identity"]["protocol"]["statistics"]
-        rows = summarize(args.run_dir, settings)
-        costs = cost_report(args.run_dir)
-        print(json.dumps({"overall_rows": len(rows), "complete_rows": sum(r["status"] == "complete" for r in rows), "costs": costs}, indent=2))
+        output = {}
+        if (args.run_dir / "evaluation_manifest.json").exists():
+            rows = summarize(args.run_dir, settings)
+            output.update(overall_rows=len(rows), complete_rows=sum(r["status"] == "complete" for r in rows))
+        if (args.run_dir / "ablation_plan.json").exists():
+            output["process_best"] = process_best_report(args.run_dir)
+        output["costs"] = cost_report(args.run_dir)
+        print(json.dumps(output, indent=2, ensure_ascii=False))
         return
     if args.command == "status":
         from collections import Counter
@@ -167,10 +172,14 @@ def main(argv=None):
         if not plan["assets"]:
             raise ValueError("No verified recoverable assets. Review the audit or use explicit table2-rebuild.")
         protocol["repair_plan_hash"] = __import__("hashlib").sha256(args.plan.read_bytes()).hexdigest()
-    if args.command == "ablation" and not protocol["ablation"]["benchmarks"]:
-        raise ValueError("The agreed Direct Oracle ablation runs inside `generalization` on SkillLearnBench (method direct_oracle); "
-                         "the native SkillsBench/WildClaw ablation is disabled in protocol.json")
-    benchmarks = ["skilllearnbench"] if args.command in {"pilot", "generalization"} else ["skillsbench", "wildclawbench"]
+    if args.command == "ablation":
+        if not protocol["ablation"]["benchmarks"]:
+            raise ValueError("protocol.json has no ablation benchmarks")
+        benchmarks = list(protocol["ablation"]["benchmarks"])
+    elif args.command in {"pilot", "generalization"}:
+        benchmarks = ["skilllearnbench"]
+    else:
+        benchmarks = ["skillsbench", "wildclawbench"]
     if not args.plan_only:
         preflight(protocol["models"], benchmarks, writer=args.command == "table2-rebuild")
     protocol, config_hash = prepare_run(args.run_dir, protocol)
@@ -198,6 +207,9 @@ def main(argv=None):
             from .statistics import summarize, cost_report
             if any(job["kind"] == "evaluate" for job in jobs):
                 summarize(args.run_dir, protocol["statistics"])
+            if args.command == "ablation":
+                from .statistics import process_best_report
+                process_best_report(args.run_dir)
             cost_report(args.run_dir)
 
 

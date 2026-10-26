@@ -9,14 +9,30 @@ def test_generalization_has_agreed_groups_one_run_and_no_seed_in_test(tmp_path, 
     tasks = [Instance(f"family{i}", n, tmp_path / f"family{i}-{n}") for i in range(20) for n in range(1, 6)]
     monkeypatch.setattr(runner, "instances", lambda: tasks)
     protocol = load_protocol()
-    assert protocol["skilllearnbench"]["methods"] == ["no_skill", "llm_written", "skillopt", "skilllift", "direct_oracle"]
+    assert protocol["skilllearnbench"]["methods"] == ["no_skill", "llm_written", "skillopt", "skilllift"]
     jobs = runner.generalization_jobs(tmp_path, protocol, "cfg")
     counts = Counter(job["kind"] for job in jobs)
-    # 2 models x 5 methods x 1 run x 20 families; 4 held-out instances per mock family.
-    assert counts == {"train": 200, "evaluate": 800}
+    # 2 models x 4 methods x 1 run x 20 families; 4 held-out instances per mock family.
+    assert counts == {"train": 160, "evaluate": 640}
     assert all(job["instance"] > 1 for job in jobs if job["kind"] == "evaluate")
     assert {job["run"] for job in jobs} == {0}
-    assert len({(job["model"], job["method"]) for job in jobs}) == 10
+    assert len({(job["model"], job["method"]) for job in jobs}) == 8
+
+
+def test_skillsbench_ablation_arms_follow_the_published_reference_decision(tmp_path, monkeypatch):
+    monkeypatch.setattr(oracles, "native_task_ids", lambda benchmark: [f"{benchmark}-{i}" for i in range(87)])
+    protocol = load_protocol()
+    assert protocol["ablation"]["benchmarks"] == ["skillsbench"]
+    jobs = runner.ablation_jobs(tmp_path, protocol, "cfg")
+    counts = Counter((job["model"], job["method"], job["kind"]) for job in jobs)
+    # GLM: Direct Oracle only, compared with the published Table 2 SkillLift result (no new SkillLift, no finals).
+    assert counts[("glm", "direct_oracle", "train")] == 87 and counts[("glm", "skilllift", "train")] == 0
+    assert not any(job["model"] == "glm" and job["kind"] == "evaluate" for job in jobs)
+    # DeepSeek-V4.1-Flash: both arms are new, each frozen skill re-run twice independently.
+    for method in ("skilllift", "direct_oracle"):
+        assert counts[("deepseek", method, "train")] == 87 and counts[("deepseek", method, "evaluate")] == 174
+    assert {job["benchmark"] for job in jobs} == {"skillsbench"}
+    assert protocol["ablation"]["published_reference"]["glm"]["skilllift"]["mean_percent"] == 75.1
 
 
 def test_fresh_table2_plan_contains_all_36_overall_conditions(tmp_path, monkeypatch):

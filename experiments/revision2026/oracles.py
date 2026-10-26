@@ -132,6 +132,7 @@ class TrainingOracle:
         self.last_feedback = {}
         self.last_conversation = []
         self.calls = 0
+        self.valid_rewards = []  # (trial phase, reward) of every valid training execution
 
     def public_task(self, task_id):
         from skilllift.portfolio import PublicTask
@@ -173,6 +174,7 @@ class TrainingOracle:
             self.last_feedback["oracle_criterion_outcomes"] = verifier_diagnostics(folder)
             if result["status"] != "OK":
                 return CandidateEvaluation.infrastructure_failure(result.get("error", "Oracle failed"))
+            self.valid_rewards.append((getattr(trial, "phase", None), float(result["reward"])))
             return CandidateEvaluation.valid(result["reward"], result_hash=digest(result), artifact_ref=str(folder / "result.json"), usage_ref=str(self.ledger))
         result = checked_native_result(self.native.evaluate(task_id, portfolio, trial))
         trial_root = execution_root(result.artifact_ref) if result.artifact_ref else self.root / "unavailable-public-trace"
@@ -184,7 +186,21 @@ class TrainingOracle:
         append_event(self.ledger, {"kind": "native_oracle_rollout", "phase": "training",
                                   "trial": trial.to_dict() if hasattr(trial, "to_dict") else vars(trial),
                                   "result": result.to_dict(), "feedback_source": "solver artifacts only"})
+        if result.is_valid:
+            self.valid_rewards.append((getattr(trial, "phase", None), float(result.reward)))
         return result
+
+
+def process_best(valid_rewards):
+    """Table 2 metric: best oracle score of any evolved or seed skill observed during evolution.
+
+    SkillLift's internal final re-runs of its winner are kept separate so the two
+    arms are compared on the same anchor + candidate executions."""
+    search = [reward for phase, reward in valid_rewards if phase != "final"]
+    every = [reward for _, reward in valid_rewards]
+    return {"best_excluding_internal_final": max(search) if search else None,
+            "best_including_internal_final": max(every) if every else None,
+            "valid_executions": len(every)}
 
 
 def native_adapter(benchmark, task_id, model, root, protocol):

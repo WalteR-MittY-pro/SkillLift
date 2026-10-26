@@ -232,3 +232,54 @@ def cost_report(root):
                "scope": "All recorded attempts, including failed/interrupted training. Missing usage/cost is unknown, never zero. Reported tokens are a lower bound when usage is unavailable. Native surrogate-artifact rollouts are included; SkillOpt _total is counted once."}
     write_json(report / "cost_summary.json", summary)
     return summary
+
+
+def process_best_report(root):
+    """Table 2-style metric for the ablation: per-task best oracle score seen during evolution.
+
+    The denominator is the full planned training roster; a missing or unfinished cell keeps the
+    group incomplete (coverage only, no mean). Published references are listed beside
+    the new rows and are never mixed into them."""
+    from .runner import ablation_jobs, cell_path
+    root = Path(root)
+    manifest = read_json(root / "run_manifest.json")
+    protocol = manifest["identity"]["protocol"]
+    rows, groups = [], {}
+    # Rebuild the full training roster so a later `--stage test` plan cannot shrink it.
+    for job in ablation_jobs(root, protocol, manifest["config_hash"], stage="train"):
+        if job["method"] in {"no_skill", "human_written", "llm_written"}:
+            continue
+        marker = cell_path(root, job["benchmark"], job["model"], job["method"], job["run"], job["family"]) / "frozen.json"
+        best = read_json(marker)["training"].get("process_best") if marker.exists() else None
+        row = {"benchmark": job["benchmark"], "model": job["model"], "method": job["method"], "evolution_run": job["run"],
+               "task_id": job["family"], "frozen": marker.exists(),
+               "best_excluding_internal_final": (best or {}).get("best_excluding_internal_final"),
+               "best_including_internal_final": (best or {}).get("best_including_internal_final")}
+        rows.append(row)
+        groups.setdefault((job["benchmark"], job["model"], job["method"]), []).append(row)
+    summary = []
+    for (benchmark, model, method), items in sorted(groups.items()):
+        complete = all(item["best_including_internal_final"] is not None for item in items)
+        entry = {"benchmark": benchmark, "model": model, "method": method, "source": "this run", "expected": len(items),
+                 "observed": sum(item["best_including_internal_final"] is not None for item in items),
+                 "status": "complete" if complete else "incomplete",
+                 "mean_best_excluding_internal_final_percent": None, "mean_best_including_internal_final_percent": None}
+        if complete:
+            for key in ("best_excluding_internal_final", "best_including_internal_final"):
+                entry[f"mean_{key}_percent"] = 100 * float(np.mean([item[key] for item in items]))
+        summary.append(entry)
+    for model, methods in protocol["ablation"].get("published_reference", {}).items():
+        for method, reference in methods.items():
+            summary.append({"benchmark": reference["benchmark"], "model": model, "method": method, "source": reference["source"],
+                            "expected": reference.get("tasks"), "observed": None, "status": "published",
+                            "mean_best_excluding_internal_final_percent": None,
+                            "mean_best_including_internal_final_percent": reference["mean_percent"],
+                            "note": reference["metric"]})
+    report = root / "report"
+    report.mkdir(exist_ok=True)
+    csv_write(report / "process_best_by_task.csv", rows)
+    csv_write(report / "process_best_summary.csv", summary)
+    write_json(report / "process_best_summary.json", {"rows": summary, "note":
+        "Process-best uses the same training executions that selected the skill (the Table 2 definition); it is optimistic "
+        "and is not an independent held-out estimate. Published rows are copied from the paper, not recomputed."})
+    return summary

@@ -5,7 +5,7 @@
 | 实验 | 运行内容 | 主要产物 |
 |---|---|---|
 | 泛化 | **SkillLearnBench**，GLM-5.1 / DeepSeek V4.1-flash，No skill、GPT-6-SOL 技能、官方 SkillOpt 适配、SkillLift；1 次完整演化 | 独立未见实例成绩、CI、配对检验、token/费用记录 |
-| Direct Oracle 消融 | **与泛化同一次运行**（SkillLearnBench，方法 `direct_oracle`），与 SkillLift 共用种子、执行器、训练实例和测试名单 | 未见实例成绩差、逐轮 oracle 次数/token 曲线、实际成本 |
+| Direct Oracle 消融 | **SkillsBench（87 题）**：GLM-5.1 只跑 Direct Oracle，与论文 Table 2 的 SkillLift 75.1 对照；DeepSeek-V4.1-Flash 跑 SkillLift + Direct Oracle | 过程最好分（Table 2 口径）、DeepSeek 两组的独立复测配对比较、逐轮曲线、实际成本 |
 | Table 2 统计 | 恢复旧技能并补独立评测；无法恢复时可完整重跑旧表的 3 模型 × 6 方法 × 2 benchmark | 36 项可用性审计、新均值和 CI、配对差值和 Holm 校正 p |
 
 ## 1. 在 WSL 准备环境
@@ -65,7 +65,7 @@ Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，
 
 **方法边界：**
 
-- 2026-10-26 起正式方法为 `no_skill`、`llm_written`、`skillopt`、`skilllift`、`direct_oracle`，只做 **1 次**完整演化（时间限制；不估计演化间波动）。`human_written` 代码仍在，但不在正式方法列表中；若加回，它是作者提供的参考技能，不宣称作者只接触过训练实例。
+- 2026-10-26 起正式方法为 `no_skill`、`llm_written`、`skillopt`、`skilllift`，只做 **1 次**完整演化（时间限制；不估计演化间波动）。`human_written` 代码仍在，但不在正式方法列表中；若加回，它是作者提供的参考技能，不宣称作者只接触过训练实例。
 - `llm_written` 是本会话 fresh-context GPT-6-SOL 子 agent 生成的 20 份技能，两模型共用。输入来源和未读取资源边界见 `seeds/`。这是无执行反馈的 agent 生成流程，不声称单个原始 API 请求，也不伪造其 token 用量。
 - SkillOpt 和 SkillLift 从同一份冻结 GPT-6-SOL skill 起步。
 - SkillOpt 直接使用固定官方 `ReflACTTrainer + EnvAdapter`。它的中间验收也对训练实例进行全新执行，不把实例 2+ 当 selection。该调整必须在论文中声明。
@@ -73,9 +73,19 @@ Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，
 - 官方 SkillLearnBench CLI 没有原生 GLM/DeepSeek 通用 API 执行器，本工具使用同一套 OpenAI-compatible Docker tool agent，复用官方环境和 verifier。论文应注明 harness 变化；不能拿官方 Claude harness 的分数直接当这两个模型的无技能分数。
 - Solver 容器启动时不提供隐藏 tests；停止全部 solver 进程后，从容器快照启动独立 scorer，再挂载官方 tests。评分进程异常、缺失/非法 reward 都是 ERROR，不记为有效 0 分。
 
-## 4. Direct Oracle 消融（在 SkillLearnBench 泛化运行中）
+## 4. Direct Oracle 消融（SkillsBench）
 
-2026-10-26 起，消融不再在 SkillsBench/WildClaw 上单独运行（`ablation` 命令在 protocol 中禁用）。`direct_oracle` 是 `generalization` 的一个方法，与 `skilllift` 使用同一份 GPT-6-SOL 初始技能、同一执行器、只用实例 1 训练，并在同一组 80 个未见实例上测试。统计报告会自动给出 Direct Oracle 相对 SkillLift 的配对差值、CI 和 Holm 校正 p。
+```bash
+$PY -m experiments.revision2026 ablation --run-dir runs/revision2026/ablation --workers 4
+$PY -m experiments.revision2026 report --run-dir runs/revision2026/ablation
+```
+
+范围（作者 2026-10-26 决定，见 `protocol.json` 的 `ablation.arms`）：
+
+- 只在 SkillsBench 87 题上运行，使用各题原生初始技能（与论文 Table 2 的演化方法相同）和原生 OpenHands 执行器。
+- **GLM-5.1 只跑 `direct_oracle`**，对照论文 Table 2 的 SkillLift 结果 75.1（`ablation.published_reference`），不新跑 SkillLift，也不做独立复测。
+- **DeepSeek-V4.1-Flash 两组都新跑**（论文中的 DeepSeek 是 V4-Pro），冻结后每题再独立复测 2 次，报告逐题配对差值、CI 和 p。
+- 主指标是 Table 2 的口径：每题演化过程中观察到的最好 oracle 分数（含 anchor），由 `report` 写入 `report/process_best_summary.csv`；SkillLift 的 2 次内部 final 单独列出。这个口径使用了选择技能时的同一批执行，偏乐观，不是独立测试成绩；论文中需说明。已发表行只从论文抄录，不重算。
 
 **结构与 SkillLift 对齐（方案 A）。** SkillLift 每轮只在 K 个候选上花 oracle（内部修改由 rubric 打分）。`direct_oracle` 去掉 rubricator、verifier 和 rank alignment，每轮：
 

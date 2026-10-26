@@ -67,20 +67,31 @@ def generalization_jobs(root, protocol, config_hash, stage="all", pilot=False):
     return jobs
 
 
+def ablation_arms(protocol, model):
+    """Per-model ablation arms. A model may omit an arm whose published result is the reference."""
+    arms = protocol["ablation"].get("arms")
+    if arms is None:
+        return {"methods": protocol["ablation"]["methods"], "independent_final": True}
+    if model not in arms:
+        raise ValueError(f"No ablation arms configured for model {model}")
+    return arms[model]
+
+
 def ablation_jobs(root, protocol, config_hash, stage="all", benchmarks=None):
     from .oracles import native_task_ids
     jobs = []
     for benchmark in benchmarks or protocol["ablation"]["benchmarks"]:
         for task_id in native_task_ids(benchmark):
             for model in protocol["models"]:
-                for method in protocol["ablation"]["methods"]:
+                arm = ablation_arms(protocol, model)
+                for method in arm["methods"]:
                     for run in range(protocol["evolution_runs"]):
                         common = dict(benchmark=benchmark, model=model, method=method, run=run, family=task_id,
                                       root=str(Path(root).resolve()), protocol=protocol, config_hash=config_hash)
                         if stage in {"all", "train"}:
                             jobs.append({**common, "kind": "train"})
-                        if stage in {"all", "test"}:
-                            for repeat in range(protocol["ablation"]["final_repeats"]):
+                        if stage in {"all", "test"} and arm["independent_final"]:
+                            for repeat in range(arm.get("final_repeats", protocol["ablation"]["final_repeats"])):
                                 jobs.append({**common, "kind": "evaluate", "phase": "independent_final", "task_id": task_id, "repeat": repeat})
     return jobs
 
@@ -148,7 +159,9 @@ def train_cell(spec):
         winner, details = run_coevo(**kwargs)
     else:
         raise ValueError("Unsupported optimization method: " + spec["method"])
-    freeze_cell(winner, cell, spec, {**details, "initial_hash": initial_hash, "oracle_rollouts": oracle.calls, "attempt": str(attempt)})
+    from .oracles import process_best
+    freeze_cell(winner, cell, spec, {**details, "initial_hash": initial_hash, "oracle_rollouts": oracle.calls,
+                                     "process_best": process_best(oracle.valid_rewards), "attempt": str(attempt)})
 
 
 def evaluation_path(spec):
