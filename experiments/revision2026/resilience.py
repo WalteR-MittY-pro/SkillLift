@@ -2,7 +2,7 @@
 
 Two mechanisms, both conservative about what they reuse:
 
-* Retries. API/infrastructure failures that look transient (429, 408, 409, 5xx,
+* Retries. API/infrastructure failures that look transient (404, 429, 408, 409, 5xx,
   connection resets, timeouts) are retried with exponential backoff and jitter. Errors
   that cannot succeed on retry (400 bad request, 401/403, content-filter or unsupported
   input codes, context overflow) fail immediately. A failed execution is never scored.
@@ -21,92 +21,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import random
-import re
 import time
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 
 from .common import utc_now
 
-DEFAULT_POLICY = {"api_max_attempts": 8, "api_base_seconds": 5, "api_max_seconds": 300,
-                  "oracle_max_attempts": 3, "oracle_base_seconds": 30, "oracle_max_seconds": 900,
-                  "job_max_attempts": 1, "job_base_seconds": 60}
-
-_TRANSIENT_STATUS = {408, 409, 425, 429}
-_PERMANENT_STATUS = {400, 401, 403, 404, 413, 422}
-_TRANSIENT_TEXT = re.compile(
-    r"\b(408|409|425|429|5\d\d)\b|rate.?limit|too many requests|timed? ?out|timeout|temporar|"
-    r"connection (reset|refused|aborted|error)|reset by peer|remote end closed|broken pipe|eof occurred|"
-    r"overloaded|bad gateway|service unavailable|gateway time|server error|try again|ssl", re.I)
-_PERMANENT_TEXT = re.compile(
-    r"\b(400|401|403|404|413|422|1210|1301)\b|invalid api key|authentication|unauthori[sz]ed|permission denied|"
-    r"content.?filter|context.?length|maximum context|unsupported (image|content)|参数非法", re.I)
-
-
-def policy_from(protocol):
-    result = {**DEFAULT_POLICY, **(protocol or {}).get("retry", {})}
-    for key in ("api_max_attempts", "oracle_max_attempts", "job_max_attempts"):
-        if not isinstance(result[key], int) or result[key] < 1:
-            raise ValueError(f"{key} must be a positive integer")
-    return result
-
-
-def is_transient(error):
-    """True only for failures that a later identical attempt can plausibly fix."""
-    if re.search(r"insufficient_quota|quota.exceeded|billing.hard.limit|insufficient.balance", str(error), re.I):
-        return False
-    status = getattr(error, "status_code", None) or getattr(error, "code", None)
-    if isinstance(status, int):
-        if status in _PERMANENT_STATUS:
-            return False
-        if status in _TRANSIENT_STATUS or 500 <= status <= 599:
-            return True
-    name = type(error).__name__ if isinstance(error, BaseException) else ""
-    if name in {"APIConnectionError", "APITimeoutError", "RateLimitError", "InternalServerError",
-                "ConnectionError", "TimeoutError", "ReadTimeout", "ConnectTimeout"}:
-        return True
-    text = str(error)
-    if isinstance(error, BaseException) and error.__cause__ is not None:
-        text += " " + str(error.__cause__)
-    if _PERMANENT_TEXT.search(text):
-        return False
-    return bool(_TRANSIENT_TEXT.search(text))
-
-
-def backoff_seconds(attempt, base, cap, retry_after=None):
-    if retry_after is not None:
-        try:
-            return max(0.0, float(retry_after))
-        except (TypeError, ValueError):
-            try:
-                instant = parsedate_to_datetime(str(retry_after))
-                return max(0.0, (instant - datetime.now(timezone.utc)).total_seconds())
-            except (TypeError, ValueError):
-                pass
-    return min(cap, base * 2 ** attempt) * (0.5 + random.random() / 2)
-
-
-def retry_call(fn, *, attempts, base, cap, describe, log=None, sleep=None):
-    """Call fn(); retry transient exceptions. The last exception is re-raised."""
-    sleep = sleep or time.sleep
-    for attempt in range(attempts):
-        try:
-            return fn()
-        except Exception as exc:  # noqa: BLE001 - classification decides
-            if attempt + 1 >= attempts or not is_transient(exc):
-                raise
-            source, headers = exc, {}
-            while source is not None:
-                headers = getattr(getattr(source, "response", None), "headers", None) or getattr(source, "headers", None) or {}
-                if headers:
-                    break
-                source = source.__cause__
-            delay = backoff_seconds(attempt, base, cap, headers.get("retry-after") if hasattr(headers, "get") else None)
-            if log:
-                log({"kind": "transient_retry", "what": describe, "attempt": attempt + 1, "error_type": type(exc).__name__,
-                     "error": str(exc)[:300], "sleep_seconds": round(delay, 1)})
-            sleep(delay)
+from .http_retry import DEFAULT_POLICY, RetryExhausted, policy_from, is_transient, backoff_seconds, retry_call
 
 
 def request_key(*parts):
@@ -174,13 +93,16 @@ class Journal:
 class ResilientLLM:
     """Wraps LLMClient: longer transient retries plus journal replay of identical prompts."""
 
-    def __init__(self, client, policy, journal=None, log=None):
+    def __init__(self, client, policy, journal=None, log=None, failure_state=None):
         self.client, self.policy, self.journal, self.log = client, policy, journal, log
+        self.failure_state = failure_state if failure_state is not None else {}
 
     def __getattr__(self, name):
         return getattr(self.client, name)
 
     def call_text(self, system_prompt, user_prompt, temperature=0.0, *, response_format=None, max_completion_tokens=None):
+        if self.failure_state.get("error"):
+            raise self.failure_state["error"]
         key = request_key("llm", getattr(self.client, "role", None), getattr(self.client, "model", None), system_prompt,
                           user_prompt, temperature, response_format, max_completion_tokens)
         if self.journal is not None:
@@ -192,7 +114,8 @@ class ResilientLLM:
                                                             max_completion_tokens=max_completion_tokens),
                               attempts=self.policy["api_max_attempts"], base=self.policy["api_base_seconds"],
                               cap=self.policy["api_max_seconds"], describe=f"llm:{getattr(self.client, 'role', 'llm')}", log=self.log)
-        except Exception:
+        except Exception as exc:
+            self.failure_state["error"] = exc
             if self.journal is not None:
                 self.journal.release(key)
             raise

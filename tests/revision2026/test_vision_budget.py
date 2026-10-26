@@ -126,10 +126,12 @@ def test_native_glm_bridge_is_deployed_without_embedding_credentials(tmp_path, m
     # native_adapter sets process-local bridge env for its child; restore after this test.
     for suffix in ("MODEL", "BASE_URL", "API_KEY", "ATTEMPTS", "MAX_TOKENS"):
         monkeypatch.setenv("SKILLLIFT_VISION_" + suffix, "")
+    monkeypatch.setenv("SKILLLIFT_API_MAX_ATTEMPTS", "")
     adapter = oracles.native_adapter("skillsbench", "task", "glm", tmp_path, load_protocol())
     source = adapter.settings.patch_source.read_text()
     compile(source, "generated-oh-patch", "exec")
-    assert "install_openhands_vision()" in source and "synthetic-private-key" not in source
+    assert "install_openhands_vision(retry_call)" in source and "synthetic-private-key" not in source
+    assert "install_openhands_retry(retry_call)" in source
     assert adapter.settings.model == "vllm/GLM-5.1"
 
 
@@ -193,8 +195,8 @@ def test_run_all_supplementary_does_not_launch_historical_rebuild(tmp_path):
     env = {key: value for key, value in os.environ.items() if key not in {"LEGACY_ARCHIVE", "WORKERS", "RUN_ROOT"}}
     subprocess.run(["bash", str(script), "supplementary", "deepseek"], check=True, cwd=tmp_path, env=env, capture_output=True)
     calls = (tmp_path / "calls.log").read_text().splitlines()
-    assert len(calls) == 4 and all("--models deepseek" in line for line in calls)
-    assert all("--workers 8" in line for line in calls[1:])
+    assert len(calls) == 1 and "supplementary" in calls[0] and "--models deepseek" in calls[0]
+    assert "--glm-workers 4" in calls[0] and "--deepseek-workers 8" in calls[0]
     assert not any("table2" in line or "historical" in line or "wildclaw" in line for line in calls)
 
 

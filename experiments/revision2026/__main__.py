@@ -85,6 +85,13 @@ def main(argv=None):
     doctor.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
     budget_parser = sub.add_parser("budget", help="Print the audited SkillOpt oracle-execution budget without running models")
     budget_parser.add_argument("--protocol", type=Path)
+    together = sub.add_parser("supplementary", help="Run both new experiments in shared GLM/DeepSeek queues")
+    together.add_argument("--run-dir", type=Path, required=True)
+    together.add_argument("--protocol", type=Path)
+    together.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
+    together.add_argument("--glm-workers", type=int, default=4)
+    together.add_argument("--deepseek-workers", type=int, default=8)
+    together.add_argument("--plan-only", action="store_true")
     for name in ["pilot", "generalization", "ablation", "table2-rebuild"]:
         p = sub.add_parser(name)
         p.add_argument("--run-dir", type=Path, required=True)
@@ -168,6 +175,15 @@ def main(argv=None):
         return
     if getattr(args, "models", None):
         protocol["models"] = list(dict.fromkeys(args.models))
+    if args.command == "supplementary":
+        if not 1 <= args.glm_workers <= 4 or not 1 <= args.deepseek_workers <= 8:
+            raise ValueError("GLM workers must be 1–4; DeepSeek workers must be 1–8")
+        if not args.plan_only:
+            preflight(protocol["models"], ["skilllearnbench", "skillsbench"], protocol=protocol)
+        from .batch import run_supplementary
+        print(json.dumps(run_supplementary(args.run_dir, protocol, glm_workers=args.glm_workers,
+                                          deepseek_workers=args.deepseek_workers, plan_only=args.plan_only), indent=2))
+        return
     if args.command == "preflight":
         models = protocol["models"]
         if args.historical:

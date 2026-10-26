@@ -20,10 +20,14 @@ VISION_PROMPT = (
 
 
 class ImageReader:
-    def __init__(self, endpoint, ledger, *, attempts=8, max_tokens=16384, client=None):
+    def __init__(self, endpoint, ledger, *, attempts=4, max_tokens=16384, client=None, retry_fn=None):
         self.endpoint, self.ledger = endpoint, Path(ledger)
         self.attempts, self.max_tokens = attempts, max_tokens
         self.client, self.cache = client, {}
+        if retry_fn is None:
+            from .http_retry import retry_call
+            retry_fn = retry_call
+        self.retry_fn = retry_fn
         self.lock = threading.Lock()
 
     def describe(self, url):
@@ -36,16 +40,16 @@ class ImageReader:
                 return self.cache[key]
             if self.client is None:
                 from openai import OpenAI
-                # One retry layer: OpenAI SDK retries 429/408/409/5xx and connection
-                # failures. Seven retries means at most eight HTTP attempts.
                 self.client = OpenAI(api_key=self.endpoint["API_KEY"], base_url=self.endpoint["BASE_URL"],
-                                     timeout=300, max_retries=self.attempts - 1)
+                                     timeout=300, max_retries=0)
             self.ledger.parent.mkdir(parents=True, exist_ok=True)
             event = {"kind": "vision_usage", "model": self.endpoint["MODEL"], "image_sha256": key}
             try:
-                reply = self.client.chat.completions.create(model=self.endpoint["MODEL"], max_tokens=self.max_tokens,
+                def request():
+                    return self.client.chat.completions.create(model=self.endpoint["MODEL"], max_tokens=self.max_tokens,
                     messages=[{"role": "user", "content": [{"type": "text", "text": VISION_PROMPT},
                                {"type": "image_url", "image_url": {"url": url}}]}])
+                reply = self.retry_fn(request, attempts=self.attempts, base=5, cap=300, describe="vision")
                 event.update(usage=reply.usage.model_dump() if reply.usage else None,
                              response_model=reply.model)
                 value = reply.choices[0].message.content
@@ -79,7 +83,7 @@ def observe_messages(messages, reader, text_type):
     return result
 
 
-def install_openhands_vision():
+def install_openhands_vision(retry_fn=None):
     if not os.environ.get("SKILLLIFT_VISION_MODEL"):
         return
     from openhands.sdk import LLM
@@ -88,8 +92,8 @@ def install_openhands_vision():
         return
     reader = ImageReader({key: os.environ[f"SKILLLIFT_VISION_{key}"] for key in ("MODEL", "BASE_URL", "API_KEY")},
                          "/logs/agent/vision_usage.jsonl",
-                         attempts=int(os.environ.get("SKILLLIFT_VISION_ATTEMPTS", "8")),
-                         max_tokens=int(os.environ.get("SKILLLIFT_VISION_MAX_TOKENS", "16384")))
+                         attempts=int(os.environ.get("SKILLLIFT_VISION_ATTEMPTS", "4")),
+                         max_tokens=int(os.environ.get("SKILLLIFT_VISION_MAX_TOKENS", "16384")), retry_fn=retry_fn)
     original = LLM.format_messages_for_llm
 
     def formatted(self, messages):

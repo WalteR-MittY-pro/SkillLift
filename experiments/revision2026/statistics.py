@@ -154,14 +154,18 @@ def cost_report(root):
     root = Path(root)
     rows, native_seen = [], set()
     for path in sorted(root.glob("**/*usage.jsonl")):
-        for line in path.read_text().splitlines():
+        lines = path.read_text().splitlines()
+        per_call_skillopt = any('"kind": "skillopt_api_usage"' in line for line in lines)
+        for line in lines:
             if not line.strip():
                 continue
             event = json.loads(line)
             kind = event.get("kind")
             if kind == "skillopt_framework_usage":
+                if per_call_skillopt:
+                    continue  # The per-request ledger survives interruption and is not added twice.
                 usage = event.get("summary", {}).get("_total", {})
-            elif kind in {"framework_usage", "solver_usage", "vision_usage"}:
+            elif kind in {"framework_usage", "solver_usage", "vision_usage", "skillopt_api_usage"}:
                 usage = event.get("usage") or {}
             elif "usage_record_id" in event and "total_tokens" in event:
                 usage = event
@@ -221,7 +225,7 @@ def cost_report(root):
             aggregate["reported_tokens"] += value
             if phase in {"training", "final_evaluation"}:
                 aggregate[phase + "_tokens"] += value
-            role = "framework" if row["kind"] in {"framework_usage", "skillopt_framework_usage"} else "oracle"
+            role = "framework" if row["kind"] in {"framework_usage", "skillopt_framework_usage", "skillopt_api_usage"} else "oracle"
             aggregate[role + "_tokens"] += value
             if row["kind"] == "vision_usage":
                 aggregate["vision_tokens"] += value

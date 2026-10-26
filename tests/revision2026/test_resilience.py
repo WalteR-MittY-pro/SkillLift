@@ -13,14 +13,14 @@ class HTTPLike(Exception):
         self.status_code = status
 
 
-@pytest.mark.parametrize("error", [HTTPLike(429), HTTPLike(408), HTTPLike(503), TimeoutError("read timed out"),
+@pytest.mark.parametrize("error", [HTTPLike(429), HTTPLike(404), HTTPLike(408), HTTPLike(503), TimeoutError("read timed out"),
                                    "LLM call failed: HTTP Error 429: Too Many Requests", "Connection reset by peer",
                                    "APIConnectionError: Connection error."])
 def test_transient_failures_are_retryable(error):
     assert resilience.is_transient(error)
 
 
-@pytest.mark.parametrize("error", [HTTPLike(400), HTTPLike(401), HTTPLike(404), HTTPLike(429, "insufficient_quota"), "Error code: 400 - {'code': '1210', 'message': 'image not supported'}",
+@pytest.mark.parametrize("error", [HTTPLike(400), HTTPLike(401), HTTPLike(429, "insufficient_quota"), "Error code: 400 - {'code': '1210', 'message': 'image not supported'}",
                                    "maximum context length exceeded", "Invalid API key", "Verifier did not write reward.txt"])
 def test_permanent_or_task_failures_are_not_retried(error):
     assert not resilience.is_transient(error)
@@ -54,8 +54,8 @@ def test_retry_after_is_not_shortened_and_date_header_is_supported():
 
 def test_default_retry_layers_do_not_multiply_full_task_runs():
     protocol = load_protocol()
-    assert protocol["retry"]["api_max_attempts"] == 8
-    assert protocol["retry"]["oracle_max_attempts"] == 3
+    assert protocol["retry"]["api_max_attempts"] == 4  # initial + three retries
+    assert protocol["retry"]["oracle_max_attempts"] == 4
     assert protocol["skilllift"]["max_consecutive_infra_failures"] == 1
     assert protocol["retry"]["job_max_attempts"] == 1
 

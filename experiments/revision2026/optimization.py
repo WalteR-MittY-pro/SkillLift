@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shutil
-import uuid
 from types import SimpleNamespace
 
 from .common import append_event, endpoint, write_json
@@ -16,10 +15,20 @@ def clients(model, ledger, roles=("rubricator", "skill_generator", "verifier"), 
     ep = endpoint(model)
     policy = policy_from(protocol)
     log = lambda event: append_event(ledger, event)
+    failure_state = {}
     return {role: ResilientLLM(LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=True, max_retries=0,
                                          usage_callback=lambda event: append_event(ledger, {"kind": "framework_usage", **event})),
-                               policy, journal, log)
+                               policy, journal, log, failure_state)
             for role in roles}
+
+
+def check_training_failure(oracle, llms=()):
+    if getattr(oracle, "failed_error", None):
+        raise RuntimeError(oracle.failed_error)
+    for client in llms:
+        error = getattr(client, "failure_state", {}).get("error")
+        if error:
+            raise error
 
 
 def run_skilllift(oracle, protocol, root, model, ledger, journal=None):
@@ -34,6 +43,7 @@ def run_skilllift(oracle, protocol, root, model, ledger, journal=None):
         generator=BoundedEditsSkillGenerator(llms["skill_generator"], max_input_chars=config["max_context_chars"]),
         verifier_client=llms["verifier"], store=PortfolioStore(Path(root) / "coordinator"), config=CoordinatorConfig(**config),
     ).evolve(oracle.family)
+    check_training_failure(oracle, llms.values())
     if result.stop_reason == "anchor_indeterminate":
         raise RuntimeError("SkillLift anchor did not yield a valid oracle result")
     # Never report result.final_score: legacy internal final uses training instances
@@ -125,7 +135,8 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
     spec = oracle.reward_spec()
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
-    generator = BoundedEditsSkillGenerator(clients(model, ledger, ("skill_generator",), protocol=protocol, journal=journal)["skill_generator"],
+    llms = clients(model, ledger, ("skill_generator",), protocol=protocol, journal=journal)
+    generator = BoundedEditsSkillGenerator(llms["skill_generator"],
                                            max_input_chars=config["max_context_chars"])
     task = oracle.public_task(oracle.family)
     counters = {"oracle_rollouts": 0, "generator_calls": 0}
@@ -236,6 +247,7 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
         if stop:
             stop_reason = stop
             break
+    check_training_failure(oracle, llms.values())
     return champion.root, {"stop_reason": stop_reason, "rounds": completed, "structure": "matched_to_skilllift", **counters}
 
 
@@ -255,16 +267,15 @@ def skillopt_config(protocol, root, seed_file, ep, run_index):
     return cfg
 
 
-def _harden_skillopt(protocol, ledger):
-    """Add transient retries around the official SkillOpt OpenAI-compatible calls (runtime wrapper, source untouched).
-    SkillOpt's own LLM calls are not journaled, so an interrupted SkillOpt cell re-optimizes; identical seed-skill
-    oracle executions are still replayed from the cell journal."""
+def _harden_skillopt(protocol, ledger, journal=None):
+    """Bounded retries and journal replay around the pinned backend's HTTP boundary."""
     from skillopt.model import openai_compatible_backend as backend
-    from .resilience import policy_from, retry_call
+    from .resilience import policy_from, retry_call, request_key
     import inspect
     policy = policy_from(protocol)
     if getattr(backend._chat_messages_impl, "_revision_retry", False):
-        return
+        return backend._revision_failure_state
+    failure_state = {}
     original_client, original_impl = backend._get_client, backend._chat_messages_impl
     signature = inspect.signature(original_impl)
 
@@ -273,9 +284,29 @@ def _harden_skillopt(protocol, ledger):
         # returned client rather than only the initial cached instance.
         client = original_client(role).with_options(max_retries=0)
         def create(**kwargs):
-            return retry_call(lambda: client.chat.completions.create(**kwargs), attempts=policy["api_max_attempts"],
-                              base=policy["api_base_seconds"], cap=policy["api_max_seconds"], describe=f"skillopt:{role}",
-                              log=lambda event: append_event(ledger, event))
+            if failure_state.get("error"):
+                raise failure_state["error"]
+            key = request_key("skillopt_llm", role, kwargs)
+            if journal is not None:
+                hit, saved = journal.lookup(key)
+                if hit:
+                    from openai.types.chat import ChatCompletion
+                    append_event(ledger, {"kind": "skillopt_replayed_from_journal", "role": role})
+                    return ChatCompletion.model_validate({**saved["response"], "usage": None})
+            try:
+                response = retry_call(lambda: client.chat.completions.create(**kwargs), attempts=policy["api_max_attempts"],
+                                      base=policy["api_base_seconds"], cap=policy["api_max_seconds"], describe=f"skillopt:{role}",
+                                      log=lambda event: append_event(ledger, event))
+            except Exception as exc:
+                failure_state["error"] = exc
+                if journal is not None:
+                    journal.release(key)
+                raise
+            usage = getattr(response, "usage", None)
+            append_event(ledger, {"kind": "skillopt_api_usage", "role": role, "usage": usage.model_dump() if usage else None})
+            if journal is not None:
+                journal.record(key, {"response": response.model_dump()})
+            return response
         return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
     def wrapped(*args, **kwargs):
@@ -285,6 +316,8 @@ def _harden_skillopt(protocol, ledger):
 
     wrapped._revision_retry = True
     backend._get_client, backend._chat_messages_impl = get_client, wrapped
+    backend._revision_failure_state = failure_state
+    return failure_state
 
 
 def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None):
@@ -324,8 +357,10 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
         def rollout(self, env_manager, skill_content, out_dir, **kwargs):
             rows = []
             for _ in range(env_manager.count):
+                if failure_state.get("error"):
+                    raise failure_state["error"]
                 execution_budget.consume()
-                name = "execution-" + uuid.uuid4().hex
+                name = f"execution-{execution_budget.used:05d}"  # stable prompt paths on journal replay
                 folder = Path(out_dir) / "predictions" / name
                 seed_root = folder / "skill"
                 shutil.copytree(oracle.seed, seed_root)
@@ -343,12 +378,15 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
                              "fail_reason": json.dumps(oracle.last_feedback, ensure_ascii=False), "n_turns": len(conversation)})
             return rows
 
-    _harden_skillopt(protocol, ledger)
+    failure_state = _harden_skillopt(protocol, ledger, journal=journal)
     reset_token_tracker()
     try:
         ReflACTTrainer(cfg, Adapter()).train()
     finally:
         append_event(ledger, {"kind": "skillopt_framework_usage", "summary": get_token_summary(), "count_total_only": True})
+    if failure_state.get("error"):
+        raise failure_state["error"]
+    check_training_failure(oracle)
     winner = Path(cfg["out_root"]) / "best_skill.md"
     if not winner.is_file():
         raise RuntimeError("Official SkillOpt did not produce best_skill.md")

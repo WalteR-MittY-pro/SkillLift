@@ -119,11 +119,14 @@ def ablation_jobs(root, protocol, config_hash, stage="all", benchmarks=None):
 def freeze_cell(source, cell, spec, training_details):
     cell = Path(cell)
     target = cell / "skills"
-    if target.exists():
-        raise ValueError(f"Unmarked skill directory exists: {target}; do not overwrite it")
-    staging = cell / (".freeze-" + uuid.uuid4().hex)
-    shutil.copytree(source, staging)
-    staging.replace(target)
+    if target.exists() and tree_hash(target) != tree_hash(source):
+        archive = cell / "attempts" / ("unmarked-frozen-" + uuid.uuid4().hex)
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        target.replace(archive)
+    if not target.exists():
+        staging = cell / (".freeze-" + uuid.uuid4().hex)
+        shutil.copytree(source, staging)
+        staging.replace(target)
     write_json(cell / "frozen.json", {"status": "complete", "frozen_at": utc_now(), "config_hash": spec["config_hash"],
         "benchmark": spec["benchmark"], "model": spec["model"], "method": spec["method"], "family": spec["family"],
         "evolution_run": spec["run"], "skill_hash": tree_hash(target), "training": training_details})
@@ -284,23 +287,38 @@ def evaluate_cell(spec):
 
 def worker(spec_file):
     import fcntl
+    from .concurrency import model_slot
     spec_file = Path(spec_file)
     spec = read_json(spec_file)
-    with spec_file.with_suffix(".lock").open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        write_json(spec_file.with_suffix(".status.json"), {"status": "running", "started_at": utc_now()})
+    location = (evaluation_path(spec) if spec["kind"] == "evaluate" else
+                cell_path(spec["root"], spec["benchmark"], spec.get("model", "writer"), spec.get("method", "write_seed"),
+                          spec.get("run", 0), spec["family"]))
+    location.mkdir(parents=True, exist_ok=True)
+    # The lock follows the logical task, even if two commands use different queue directories.
+    with (location / ".execution.lock").open("a") as lock:
         try:
-            if spec["kind"] == "write_seed":
-                from .legacy import write_seed
-                write_seed(spec)
-            else:
-                (train_cell if spec["kind"] == "train" else evaluate_cell)(spec)
-        except Exception as exc:
-            from .resilience import is_transient
-            write_json(spec_file.with_suffix(".status.json"), {"status": "error", "error_type": type(exc).__name__,
-                       "retryable": is_transient(exc), "finished_at": utc_now()})
-            raise
-        write_json(spec_file.with_suffix(".status.json"), {"status": "complete", "finished_at": utc_now()})
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            write_json(spec_file.with_suffix(".status.json"), {"status": "already_running", "recorded_at": utc_now()})
+            return
+        if job_done(spec):
+            write_json(spec_file.with_suffix(".status.json"), {"status": "complete", "reused": True, "finished_at": utc_now()})
+            return
+        write_json(spec_file.with_suffix(".status.json"), {"status": "waiting_for_model_slot", "started_at": utc_now()})
+        with model_slot(spec.get("model", "writer")):
+            write_json(spec_file.with_suffix(".status.json"), {"status": "running", "started_at": utc_now()})
+            try:
+                if spec["kind"] == "write_seed":
+                    from .legacy import write_seed
+                    write_seed(spec)
+                else:
+                    (train_cell if spec["kind"] == "train" else evaluate_cell)(spec)
+            except Exception as exc:
+                from .resilience import is_transient
+                write_json(spec_file.with_suffix(".status.json"), {"status": "error", "error_type": type(exc).__name__,
+                           "retryable": is_transient(exc), "finished_at": utc_now()})
+                raise
+            write_json(spec_file.with_suffix(".status.json"), {"status": "complete", "finished_at": utc_now()})
 
 
 def job_done(spec):
@@ -320,16 +338,23 @@ def job_done(spec):
     return False
 
 
-def run_jobs(jobs, root, workers, *, retry_errors=True):
+def run_jobs(jobs, root, workers, *, retry_errors=True, cancel_event=None):
     """Resumable batch execution.
 
     Restarting the same command continues where it stopped: jobs whose durable result
     exists are skipped, interrupted or failed jobs are relaunched (training cells replay
     their journal), and every earlier attempt stays on disk. A failing job is relaunched
-    up to retry.job_max_attempts times within one invocation before the phase stops."""
+    up to retry.job_max_attempts times within one invocation. Failures do not stop other jobs."""
     import time
+    from threading import Event
+    from .concurrency import MODEL_LIMITS, pool_name
     from .resilience import policy_from
     root = Path(root)
+    cancel_event = cancel_event or Event()
+    if workers < 1:
+        raise ValueError("workers must be positive")
+    pools = {pool_name(job.get("model", "writer")) for job in jobs} or {"other"}
+    workers = min(workers, sum(MODEL_LIMITS.get(pool, 4) for pool in pools))
     seal_evaluation_plan(root, jobs)
     queue, blocked, skipped = [], [], 0
     policy = policy_from(jobs[0]["protocol"] if jobs else {})
@@ -351,16 +376,31 @@ def run_jobs(jobs, root, workers, *, retry_errors=True):
     print(json.dumps({"already_complete_skipped": skipped, "to_run": len(queue), "blocked": len(blocked)}), flush=True)
 
     def launch(path):
+        if cancel_event.is_set():
+            return {"job": str(path), "status": "cancelled"}
         job = read_json(path)
+        if job["kind"] == "evaluate":
+            parent = Path(job.get("frozen_cell") or cell_path(job["root"], job["benchmark"], job["model"], job["method"], job["run"], job["family"]))
+            if not (parent / "frozen.json").exists():
+                write_json(path.with_suffix(".status.json"), {"status": "waiting_for_training", "recorded_at": utc_now()})
+                return {"job": str(path), "status": "waiting_for_training"}
         label = f"{job['kind']} {job['benchmark']}/{job['model']}/{job['method']}/{job['family']} run={job['run']}"
         for relaunch in range(int(policy["job_max_attempts"])):
+            if cancel_event.is_set():
+                return {"job": str(path), "status": "cancelled"}
             with path.with_suffix(".stdout.log").open("a") as stdout, path.with_suffix(".stderr.log").open("a") as stderr:
                 stdout.write(f"\nLauncher attempt {relaunch + 1} {utc_now()}\n")
                 stdout.flush()
-                result = subprocess.run([sys.executable, "-m", "experiments.revision2026", "worker", str(path)], cwd=ROOT, stdout=stdout, stderr=stderr)
+                try:
+                    result = subprocess.run([sys.executable, "-m", "experiments.revision2026", "worker", str(path)], cwd=ROOT, stdout=stdout, stderr=stderr)
+                except OSError as exc:
+                    write_json(path.with_suffix(".status.json"), {"status": "error", "error_type": type(exc).__name__, "finished_at": utc_now()})
+                    return {"job": str(path), "status": "error", "error_type": type(exc).__name__}
             if result.returncode == 0:
-                print(f"{label}: OK", flush=True)
-                return 0
+                status_file = path.with_suffix(".status.json")
+                state = read_json(status_file).get("status") if status_file.exists() else "complete"
+                print(f"{label}: {state.upper()}", flush=True)
+                return {"job": str(path), "status": state}
             print(f"{label}: ERROR (launch {relaunch + 1}/{policy['job_max_attempts']})", flush=True)
             status_path = path.with_suffix(".status.json")
             if status_path.exists():
@@ -369,13 +409,25 @@ def run_jobs(jobs, root, workers, *, retry_errors=True):
                     break
             if relaunch + 1 < int(policy["job_max_attempts"]):
                 time.sleep(policy["job_base_seconds"] * 2 ** relaunch)
-        return result.returncode
+        return {"job": str(path), "status": "error", "returncode": result.returncode}
 
     # Train all cells before any final evaluation. No test result can feed optimization.
+    outcomes = []
     for kind in ("write_seed", "train", "evaluate"):
         phase = [path for path in queue if read_json(path)["kind"] == kind]
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            outcomes = list(pool.map(launch, phase))
-        if any(outcomes):
-            raise RuntimeError(f"{kind} phase has {sum(code != 0 for code in outcomes)} failed jobs after retries; inspect {root / 'jobs'}. "
-                               "Completed results are kept; rerun the same command to resume. Subsequent phases were not started.")
+            try:
+                outcomes.extend(pool.map(launch, phase))
+            except KeyboardInterrupt:
+                cancel_event.set()
+                raise
+    from .common import append_event
+    summary = {"finished_at": utc_now(), "workers": workers, "skipped_complete": skipped, "blocked": blocked,
+               "status": "complete" if not blocked and all(row["status"] == "complete" for row in outcomes) else "completed_with_errors",
+               "outcomes": outcomes}
+    write_json(root / "execution_summary.json", summary)
+    append_event(root / "execution_history.jsonl", summary)
+    print(json.dumps({"status": summary["status"], "failed": sum(row["status"] == "error" for row in outcomes),
+                      "deferred": sum(row["status"] not in {"complete", "error"} for row in outcomes),
+                      "summary": str(root / "execution_summary.json")}), flush=True)
+    return summary

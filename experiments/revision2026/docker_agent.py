@@ -174,6 +174,7 @@ def run_solver(container, instruction, skill_dir, model, settings, output, ledge
             messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
         if images:
             messages.append({"role": "user", "content": images})
+        write_json(output / "conversation.json", messages)  # Retain completed tool actions if the next API request fails.
     write_json(output / "conversation.json", messages)
     return status, messages
 

@@ -9,12 +9,13 @@ if [[ -n "$MODEL" ]]; then
   [[ "$MODE" == supplementary && ( "$MODEL" == glm || "$MODEL" == deepseek ) ]] || { echo 'Model selection is supported as: run_all.sh supplementary [glm|deepseek]' >&2; exit 2; }
   MODEL_ARGS=(--models "$MODEL")
 fi
-DEFAULT_WORKERS=4
-[[ "$MODEL" != deepseek ]] || DEFAULT_WORKERS=8
-WORKERS="${WORKERS:-$DEFAULT_WORKERS}"
+WORKERS="${WORKERS:-4}"  # Legacy rebuild/repair only; supplementary has two model-specific pools.
 RUN_ROOT="${RUN_ROOT:-runs/revision2026}"
-[[ -z "$MODEL" ]] || RUN_ROOT="$RUN_ROOT/$MODEL"
 [[ -x "$PY" ]] || { echo 'Run bash experiments/revision2026/setup.sh inside WSL first.' >&2; exit 2; }
+if [[ "$MODE" == supplementary ]]; then
+  exec "$PY" -m experiments.revision2026 supplementary --run-dir "$RUN_ROOT" \
+    --glm-workers "${GLM_WORKERS:-4}" --deepseek-workers "${DEEPSEEK_WORKERS:-8}" "${MODEL_ARGS[@]}"
+fi
 if [[ "$MODE" != supplementary && "$MODE" != rebuild && "$MODE" != repair ]]; then
   echo 'Usage: run_all.sh [supplementary [glm|deepseek]|rebuild|repair]. supplementary runs only the two new experiments.' >&2
   exit 2

@@ -114,6 +114,9 @@ def checked_native_result(evaluation):
     error = raw.get("error")
     if not error:
         return evaluation
+    if "retry-exhausted" in str(error).lower() or "retryexhausted" in str(error).lower():
+        from skilllift.coordinator import CandidateEvaluation
+        return CandidateEvaluation.infrastructure_failure("[retry-exhausted] Native LLM request consumed its retries")
     kind = str(error.get("exception_type", error.get("type", ""))) if isinstance(error, dict) else str(error)
     # A reached solver budget remains a real task outcome; do not retry it for a
     # higher score. Other errors (API, setup, grader) require an explicit retry.
@@ -136,6 +139,7 @@ class TrainingOracle:
         self.calls = 0      # logical oracle executions consumed by the optimizer (replayed ones included)
         self.replayed = 0   # of which answered from the cell journal after a restart
         self.valid_rewards = []  # (trial phase, reward) of every valid training execution
+        self.failed_error = None
 
     def public_task(self, task_id):
         from skilllift.portfolio import PublicTask
@@ -168,6 +172,8 @@ class TrainingOracle:
         from .resilience import backoff_seconds, is_transient, request_key
         if task_id != self.family:
             raise ValueError("Unexpected training task")
+        if self.failed_error:
+            return CandidateEvaluation.infrastructure_failure(self.failed_error)
         self.calls += 1
         phase = getattr(trial, "phase", None)
         key = request_key("oracle", self.benchmark, self.family, self.model, portfolio.tree_hash, phase)
@@ -197,8 +203,10 @@ class TrainingOracle:
             if self.journal is not None:
                 self.journal.record(key, {"evaluation": result.to_dict(), "feedback": self.last_feedback,
                                           "conversation": self.last_conversation})
-        elif self.journal is not None:
-            self.journal.release(key)
+        else:
+            self.failed_error = result.infrastructure_error or "Oracle execution failed"
+            if self.journal is not None:
+                self.journal.release(key)
         return result
 
     def _execute(self, task_id, portfolio, trial):
@@ -248,25 +256,28 @@ def native_adapter(benchmark, task_id, model, root, protocol):
     root = Path(root)
     if benchmark == "skillsbench":
         import os
+        from .common import HERE
+        from .resilience import policy_from
         from skilllift_eval.runners.skillsbench_portfolio_adapter import SkillsBenchPortfolioAdapter, SkillsBenchPortfolioSettings
         patch = ROOT / "scripts" / "oh_skill_patch.py"
         if not patch.is_file():
             raise ValueError("Missing checked-in scripts/oh_skill_patch.py")
+        os.environ["SKILLLIFT_API_MAX_ATTEMPTS"] = str(policy_from(protocol)["api_max_attempts"])
+        patch_text = (patch.read_text() + "\n" + (HERE / "http_retry.py").read_text() + "\n"
+                      + (HERE / "native_retry.py").read_text() + "\ninstall_openhands_retry(retry_call)\n")
         if model in protocol.get("vision", {}).get("enabled_for", []):
-            from .common import HERE
-            from .resilience import policy_from
             vision = endpoint("glm_vision")
             for key, value in vision.items():
                 os.environ[f"SKILLLIFT_VISION_{key}"] = value
             os.environ["SKILLLIFT_VISION_ATTEMPTS"] = str(policy_from(protocol)["api_max_attempts"])
             os.environ["SKILLLIFT_VISION_MAX_TOKENS"] = str(protocol["vision"]["max_output_tokens"])
-            root.mkdir(parents=True, exist_ok=True)
-            combined = root / "oh_skill_patch.py"
-            combined.write_text(patch.read_text() + "\n" + (HERE / "vision_bridge.py").read_text() + "\ninstall_openhands_vision()\n")
-            patch = combined
+            patch_text += "\n" + (HERE / "vision_bridge.py").read_text() + "\ninstall_openhands_vision(retry_call)\n"
         else:
             for suffix in ("MODEL", "BASE_URL", "API_KEY", "ATTEMPTS", "MAX_TOKENS"):
                 os.environ.pop("SKILLLIFT_VISION_" + suffix, None)
+        root.mkdir(parents=True, exist_ok=True)
+        patch = root / "oh_skill_patch.py"
+        patch.write_text(patch_text)
         return SkillsBenchPortfolioAdapter(SkillsBenchPortfolioSettings(
             project_root=ROOT, tasks_root=source_path("skillsbench") / "tasks", run_root=root,
             python_executable=Path(sys.executable), model="vllm/" + ep["MODEL"], sandbox="docker",

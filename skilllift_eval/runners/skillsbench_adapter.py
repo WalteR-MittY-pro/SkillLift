@@ -222,13 +222,16 @@ def register_openhands_sse() -> Any:
         "from openhands.sdk import LLM; from openhands_cli.utils import get_default_cli_agent; "
         'model = os.environ["LLM_MODEL"]; model = model if "/" in model else f"openai/{model}"; '
         'llm = LLM(model=model, api_key=os.environ["LLM_API_KEY"], '
-        'base_url=os.environ.get("LLM_BASE_URL") or None, usage_id="agent"); '
+        'base_url=os.environ.get("LLM_BASE_URL") or None, '
+        'num_retries=int(os.environ.get("SKILLLIFT_API_MAX_ATTEMPTS", "5")), usage_id="agent"); '
         'agent = get_default_cli_agent(llm); '
         'Path.home().joinpath(".openhands", "agent_settings.json").write_text('
         'agent.model_dump_json(context={"expose_secrets": True}))\' && '
         + patch_install +
         '"$OH_PYTHON" -c \'import asyncio, os; from openhands.sdk import LLM; '
         'assert not os.getenv("SKILLLIFT_VISION_MODEL") or getattr(LLM, "_skilllift_vision_installed", False), "Vision bridge did not install"; '
+        'from openhands.sdk.llm.utils.retry_mixin import RetryMixin; '
+        'assert not os.getenv("SKILLLIFT_API_MAX_ATTEMPTS") or getattr(RetryMixin, "_skilllift_retry_installed", False), "HTTP retry patch did not install"; '
         'from openhands_cli.acp_impl.agent import run_acp_server; '
         "asyncio.run(run_acp_server(initial_confirmation_mode=\"always-approve\", streaming_enabled=True))'"
     )
@@ -252,7 +255,7 @@ def register_openhands_sse() -> Any:
         description="OpenHands agent via streaming ACP",
         launch_cmd=launch_cmd,
         env_mapping={**base.env_mapping, "BENCHFLOW_PROVIDER_MODEL": "LLM_MODEL",
-                     **{name: name for name in ("SKILLLIFT_VISION_MODEL", "SKILLLIFT_VISION_BASE_URL", "SKILLLIFT_VISION_API_KEY",
+                     **{name: name for name in ("SKILLLIFT_API_MAX_ATTEMPTS", "SKILLLIFT_VISION_MODEL", "SKILLLIFT_VISION_BASE_URL", "SKILLLIFT_VISION_API_KEY",
                                                "SKILLLIFT_VISION_ATTEMPTS", "SKILLLIFT_VISION_MAX_TOKENS") if os.environ.get(name)}},
     )
     registry.AGENTS[config.name] = config

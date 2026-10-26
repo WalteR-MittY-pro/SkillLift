@@ -31,9 +31,9 @@
     "published_reference": {"glm": {"skilllift": {"benchmark": "skillsbench", "mean_percent": 75.1, "tasks": 87, "source": "paper Table 2",
       "metric": "mean per-task best evolved-skill score over 3 rollout seeds (paper Evaluation Protocol)"}}},
     "note": "Author decision 2026-10-26: SkillsBench only. GLM-5.1 runs only Direct Oracle and is compared with the published Table 2 SkillLift result; DeepSeek-V4.1-Flash has no published SkillLift result, so both arms run and are also compared on paired independent finals. final_repeats=3 at this level is the Table 2 rebuild default and is not used by the ablation arms."},
-  "retry": {"api_max_attempts": 8, "api_base_seconds": 5, "api_max_seconds": 300,
-    "oracle_max_attempts": 3, "oracle_base_seconds": 30, "oracle_max_seconds": 900, "job_max_attempts": 1, "job_base_seconds": 60,
-    "transient": "429, 408, 409, 425, 5xx, connection reset/refused, timeouts; 400/401/403/404/413/422, quota exhaustion, 1210/1301, content filter and context overflow fail immediately",
+  "retry": {"api_max_attempts": 4, "api_base_seconds": 5, "api_max_seconds": 300,
+    "oracle_max_attempts": 4, "oracle_base_seconds": 30, "oracle_max_seconds": 900, "job_max_attempts": 1, "job_base_seconds": 60,
+    "transient": "404, 429, 408, 409, 425, 5xx, connection reset/refused, timeouts; initial attempt plus 3 retries. Exhausted API requests are not retried again by outer layers; failed tasks are recorded and the queue continues",
     "resume": "rerun the same command: finished jobs are skipped, failed/interrupted jobs relaunch, training cells replay <cell>/journal/training.jsonl; all attempts are kept"},
   "statistics": {"confidence": 0.95, "bootstrap_repeats": 10000, "permutation_repeats": 20000, "random_seed": 20261025, "multiplicity": "Holm", "incomplete_cohorts": "report coverage only; do not calculate CI or p"},
   "notes": ["1 evolution_run by author decision (2026-10-26, time); this protocol does not estimate run-to-run variability. An evolution run is a fresh optimization process, not a retry.", "The 2 internal SkillLift final trials are training-instance reevaluations, not held-out tests.", "No skill, human-written and frozen LLM-written repeat execution once per run index; they are not re-authored.", "Completed family/run cells resume by frozen content hash. Interrupted training cells restart in a new attempt.", "Runtime estimates are planning assumptions, not measured guarantees. Review pilot costs and timing before the full run."]

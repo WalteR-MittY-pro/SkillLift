@@ -4,6 +4,8 @@
 
 当前优先执行泛化和 SkillsBench 消融，最新配置、图片工具和执行次数见[开跑前审计](AUDIT_2026-10-26.md)。`run_all.sh` 默认仅这两个实验；旧 Table 2 恢复/重建保留为显式入口。
 
+**实际启动和恢复以[统一运行指南](RUN_GUIDE.md)为准：一条命令启动两个模型、两个实验，共享 GLM 4 / DeepSeek 8 的并发上限；404 也重试，首次失败后最多再试 3 次，单题失败后继续队列。**
+
 | 实验 | 运行内容 | 主要产物 |
 |---|---|---|
 | 泛化 | **SkillLearnBench**，GLM-5.1 / DeepSeek V4.1-flash，No skill、GPT-6-SOL 技能、官方 SkillOpt 适配、SkillLift；1 次完整演化 | 独立未见实例成绩、CI、配对检验、token/费用记录 |
@@ -147,32 +149,29 @@ $PY -m experiments.revision2026 table2-rebuild \
 
 ## 6. 一次启动、续跑与结果
 
-在两个 WSL 终端分别运行，自动采用 GLM 并发 4、DeepSeek 并发 8，输出目录按模型分开：
+用一条命令共同启动，两个实验共享每个模型的并发额度，输出目录按模型分开：
 
 ```bash
-# 终端 A
-bash experiments/revision2026/run_all.sh supplementary glm
-# 终端 B
-bash experiments/revision2026/run_all.sh supplementary deepseek
+bash experiments/revision2026/run_all.sh supplementary
 ```
 
-每条依次跑 pilot → generalization → ablation，不启动旧表重建。旧表需显式运行 `run_all.sh rebuild` 或设置 `LEGACY_ARCHIVE` 后运行 `run_all.sh repair`。
+每个模型先跑自己的 pilot，再交错执行泛化与消融训练，最后执行已经就绪的最终测试。GLM 总并发不超过 4、DeepSeek 不超过 8，两个模型互不等待。旧表需显式运行 `run_all.sh rebuild` 或设置 `LEGACY_ARCHIVE` 后运行 `run_all.sh repair`。
 
-**API 中断自动重试。** 429、408、409、425、5xx、连接重置和超时视为暂时性错误：
+**API 中断自动重试。** 404、429、408、409、425、5xx、连接重置和超时视为暂时性错误：
 
 | 层级 | 位置 | 最多尝试 | 退避 |
 |---|---|---|---|
-| 单次 API 调用 | 泛化 solver、框架及 SkillOpt LLM | 最多 8 次，不再叠加 SDK/内层重试 | 5 秒起指数退避，常规等待上限 300 秒；Retry-After 单独遵守 |
-| 单次 oracle 执行 | 训练中的每次执行、最终独立复测 | 最多 3 次物理执行，coordinator 不再额外叠加 | 30 秒起，上限 900 秒 |
-| 整个 job | 默认失败后停留，修复后重发同一命令续跑 | 每次启动 1 次 | 避免整轮自动重启放大费用 |
+| 单次 API 调用 | 泛化 solver、框架、SkillOpt、OpenHands、视觉工具 | 首次 + 3 次重试 | 5 秒起指数退避，常规等待上限 300 秒；Retry-After 单独遵守 |
+| 单次 oracle 执行 | 非 API 耗尽导致的暂时性执行故障 | 首次 + 3 次重试 | 30 秒起，上限 900 秒 |
+| 整个 job | 失败后记日志，跳过并继续下一题 | 每次启动 1 次，不叠加已耗尽的请求重试 | 重发原命令可恢复失败任务 |
 
-400、401、403、404、413、422、额度耗尽、1210/1301、内容过滤、上下文超长不会自动盲目重试。失败的执行从不记为 0 分。泛化 solver 因 API 重试等待的时间不计入求解时限。SkillsBench 的 OpenHands SDK 原生请求重试为最多 5 次；视觉工具使用 SDK 最多 8 次请求尝试。参数和边界详见审计报告。
+400、401、403、413、422、额度耗尽、1210/1301、内容过滤、上下文超长不会自动盲目重试。失败的执行从不记为 0 分。泛化 solver 因 API 重试等待的时间不计入求解时限。OpenHands 和视觉工具也已接入同一重试实现，API 耗尽后外层不会再乘一次重试次数。
 
 **程序中断后续跑。** 直接重跑同一条命令：
 
 - 已完成的 job（有 `frozen.json` 或状态为 OK 的 `selected.json`）直接跳过，不再执行。
 - 中断或失败的 job 自动重新运行（默认行为；加 `--no-retry-errors` 才会改为停下）。
-- 训练 cell 的每个已完成 LLM 回复和有效 oracle 执行都实时写入 `<cell>/journal/training.jsonl`（fsync）。重启后同样的请求按原顺序从 journal 返回，优化过程重放到中断点再继续，已执行的 oracle 不会再跑。SkillOpt 的 LLM 调用不在 journal 中，中断的 SkillOpt cell 会重新优化，但相同技能的执行仍会重放。
+- 训练 cell 已记录的 LLM 回复和有效 oracle 执行写入 `<cell>/journal/training.jsonl`（fsync），包含 SkillOpt 的 LLM 请求。重启后相同请求从 journal 恢复到未完成位置；仍在进行、尚未记入完成记录的 solver 执行可能需要重启。
 - 中断时的工作目录整体移到 `<cell>/attempts/<id>/`，所有日志和产物都保留；token/成本统计包含全部尝试。
 - 按作者要求允许代码、协议或端点变化后继续执行，并记录身份历史。科学条件实际变化会标记 `mixed_conditions`，不直接生成混合条件的正式均值、CI 或 p；代码修复本身保留哈希历史，由执行者确认不改变实验定义。
 
