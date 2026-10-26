@@ -227,7 +227,9 @@ def register_openhands_sse() -> Any:
         'Path.home().joinpath(".openhands", "agent_settings.json").write_text('
         'agent.model_dump_json(context={"expose_secrets": True}))\' && '
         + patch_install +
-        '"$OH_PYTHON" -c \'import asyncio; from openhands_cli.acp_impl.agent import run_acp_server; '
+        '"$OH_PYTHON" -c \'import asyncio, os; from openhands.sdk import LLM; '
+        'assert not os.getenv("SKILLLIFT_VISION_MODEL") or getattr(LLM, "_skilllift_vision_installed", False), "Vision bridge did not install"; '
+        'from openhands_cli.acp_impl.agent import run_acp_server; '
         "asyncio.run(run_acp_server(initial_confirmation_mode=\"always-approve\", streaming_enabled=True))'"
     )
     launch_cmd = base.launch_cmd.replace(
@@ -249,7 +251,9 @@ def register_openhands_sse() -> Any:
         name="openhands-sse",
         description="OpenHands agent via streaming ACP",
         launch_cmd=launch_cmd,
-        env_mapping={**base.env_mapping, "BENCHFLOW_PROVIDER_MODEL": "LLM_MODEL"},
+        env_mapping={**base.env_mapping, "BENCHFLOW_PROVIDER_MODEL": "LLM_MODEL",
+                     **{name: name for name in ("SKILLLIFT_VISION_MODEL", "SKILLLIFT_VISION_BASE_URL", "SKILLLIFT_VISION_API_KEY",
+                                               "SKILLLIFT_VISION_ATTEMPTS", "SKILLLIFT_VISION_MAX_TOKENS") if os.environ.get(name)}},
     )
     registry.AGENTS[config.name] = config
     registry.AGENT_INSTALLERS[config.name] = config.install_cmd

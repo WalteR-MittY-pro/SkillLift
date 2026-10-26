@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 import json
 from pathlib import Path
 import shutil
@@ -14,7 +15,7 @@ from .sources import PINS, Instance, instances, source_path
 
 
 def code_identity():
-    paths = sorted(set(HERE.glob("*.py")) | set((ROOT / "skilllift").rglob("*.py")) |
+    paths = sorted(set(HERE.glob("*.py")) | {ROOT / "scripts/oh_skill_patch.py"} | set((ROOT / "skilllift").rglob("*.py")) |
                    set((ROOT / "skilllift_eval").rglob("*.py")) | set((ROOT / "packages/bounded-edits/src").rglob("*.py")))
     return digest([(str(p.relative_to(ROOT)), p.read_text()) for p in paths])
 
@@ -27,6 +28,10 @@ def prepare_run(root, protocol):
     protocol = {**protocol, "source_revisions": {k: v[1] for k, v in PINS.items()}}
     identity = {"protocol": protocol, "endpoints": {m: endpoint_identity(m) for m in protocol["models"]},
                 "driver_hash": code_identity(), "seed_manifest_hash": digest(read_json(HERE / "seeds/LLM_SKILLS_FROZEN.json"))}
+    if set(protocol["models"]) & set(protocol.get("vision", {}).get("enabled_for", [])):
+        identity["vision_endpoint"] = endpoint_identity("glm_vision")
+        if identity["vision_endpoint"]["model"].lower() != protocol["vision"]["model"]:
+            raise ValueError("Vision endpoint model does not match the declared protocol")
     if protocol.get("rebuild_scope"):
         identity["writer_endpoint"] = endpoint_identity("writer")
     resolved = ROOT / ".cache/revision2026/resolved-requirements.txt"
@@ -35,14 +40,20 @@ def prepare_run(root, protocol):
     if not manifest.exists():
         write_json(manifest, {"created_at": utc_now(), "identity": identity, "config_hash": digest(identity)})
         return protocol, digest(identity)
-    # Resuming never refuses a run because code, protocol, dependencies or endpoints changed.
-    # The run keeps its original config_hash so finished cells stay finished; each change is
-    # only recorded (audit trail), and the newest settings are used from now on.
     current = read_json(manifest)
     latest = current.get("identity_latest", current["identity"])
+    def scientific_identity(value):
+        value = deepcopy(value)
+        value.pop("driver_hash", None)  # Author permits code fixes during resume; keep the hash audit trail.
+        for key in ("retry", "workers"):
+            value["protocol"].pop(key, None)
+        return value
+    if scientific_identity(latest) != scientific_identity(identity):
+        current["mixed_scientific_conditions"] = True
     if latest != identity:
         changed = sorted(key for key in set(latest) | set(identity) if latest.get(key) != identity.get(key))
-        current.setdefault("identity_history", []).append({"recorded_at": utc_now(), "identity_hash": digest(identity), "changed": changed})
+        current.setdefault("identity_history", []).append({"recorded_at": utc_now(), "identity_hash": digest(identity),
+                                                           "changed": changed, "previous_identity": latest})
         current["identity_latest"] = identity
         write_json(manifest, current)
     return protocol, current["config_hash"]
@@ -209,8 +220,11 @@ def seal_evaluation_plan(root, jobs):
         previous = read_json(path)
         if previous.get("plan_hash") == planned["plan_hash"]:
             return
-        # A changed plan (e.g. new protocol values on resume) replaces the roster; the old one is
-        # kept in the history file. Finished evaluations are matched by cell identity, not by plan.
+        old_cells = {digest({**evaluation_identity(job), "config_hash": job["config_hash"]}) for job in previous["evaluations"]}
+        new_cells = {digest({**evaluation_identity(job), "config_hash": job["config_hash"]}) for job in evaluations}
+        planned["mixed_conditions"] = previous.get("mixed_conditions", False) or old_cells != new_cells
+        # Author permits changed plans to continue. Mark them so coverage can be
+        # inspected without silently declaring a reduced roster a valid cohort.
         from .common import append_event
         append_event(Path(root) / "evaluation_manifest_history.jsonl",
                      {"replaced_plan_hash": previous.get("plan_hash"), "new_plan_hash": planned["plan_hash"],
@@ -244,7 +258,7 @@ def evaluate_cell(spec):
             from .docker_agent import evaluate
             instance = Instance(spec["family"], spec["instance"], Path(spec["task_path"]))
             result = evaluate(instance, None if spec["method"] == "no_skill" else cell / "skills", spec["model"],
-                              {**spec["protocol"]["solver"], "retry": policy}, attempt, ledger, Path(spec["root"]))
+                              {**spec["protocol"]["solver"], "retry": policy, "vision": spec["protocol"].get("vision", {})}, attempt, ledger, Path(spec["root"]))
         else:
             from .oracles import native_adapter, checked_native_result
             from skilllift.coordinator import TrialSpec
@@ -282,7 +296,9 @@ def worker(spec_file):
             else:
                 (train_cell if spec["kind"] == "train" else evaluate_cell)(spec)
         except Exception as exc:
-            write_json(spec_file.with_suffix(".status.json"), {"status": "error", "error_type": type(exc).__name__, "finished_at": utc_now()})
+            from .resilience import is_transient
+            write_json(spec_file.with_suffix(".status.json"), {"status": "error", "error_type": type(exc).__name__,
+                       "retryable": is_transient(exc), "finished_at": utc_now()})
             raise
         write_json(spec_file.with_suffix(".status.json"), {"status": "complete", "finished_at": utc_now()})
 
@@ -346,6 +362,11 @@ def run_jobs(jobs, root, workers, *, retry_errors=True):
                 print(f"{label}: OK", flush=True)
                 return 0
             print(f"{label}: ERROR (launch {relaunch + 1}/{policy['job_max_attempts']})", flush=True)
+            status_path = path.with_suffix(".status.json")
+            if status_path.exists():
+                failure = read_json(status_path)
+                if failure.get("status") == "error" and not failure.get("retryable", False):
+                    break
             if relaunch + 1 < int(policy["job_max_attempts"]):
                 time.sleep(policy["job_base_seconds"] * 2 ** relaunch)
         return result.returncode

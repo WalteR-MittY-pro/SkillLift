@@ -127,6 +127,11 @@ def run_solver(container, instruction, skill_dir, model, settings, output, ledge
     messages = [{"role": "system", "content": system}, {"role": "user", "content": instruction}]
     from .resilience import policy_from, retry_call
     policy = policy_from({"retry": settings.get("retry", {})})
+    reader = None
+    if model in settings.get("vision", {}).get("enabled_for", []):
+        from .vision_bridge import ImageReader
+        reader = ImageReader(endpoint("glm_vision"), ledger, attempts=policy["api_max_attempts"],
+                             max_tokens=settings["vision"]["max_output_tokens"])
     began = time.monotonic()
     excluded = 0.0  # time lost to transient API failures and backoff never counts against the solver budget
     status = "step_limit"
@@ -160,7 +165,10 @@ def run_solver(container, instruction, skill_dir, model, settings, output, ledge
             try:
                 content, image = tool_result(container, call.function.name, json.loads(call.function.arguments), settings["command_timeout_seconds"])
                 if image:
-                    images.append({"type": "image_url", "image_url": {"url": image}})
+                    if reader is not None:
+                        content = reader.describe(image)
+                    else:
+                        images.append({"type": "image_url", "image_url": {"url": image}})
             except (ValueError, KeyError, subprocess.SubprocessError) as exc:
                 content = f"Tool failed: {type(exc).__name__}"
             messages.append({"role": "tool", "tool_call_id": call.id, "content": content})

@@ -2,7 +2,7 @@
 
 Two mechanisms, both conservative about what they reuse:
 
-* Retries. API/infrastructure failures that look transient (429, 404, 408, 409, 5xx,
+* Retries. API/infrastructure failures that look transient (429, 408, 409, 5xx,
   connection resets, timeouts) are retried with exponential backoff and jitter. Errors
   that cannot succeed on retry (400 bad request, 401/403, content-filter or unsupported
   input codes, context overflow) fail immediately. A failed execution is never scored.
@@ -24,30 +24,38 @@ from pathlib import Path
 import random
 import re
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from .common import utc_now
 
 DEFAULT_POLICY = {"api_max_attempts": 8, "api_base_seconds": 5, "api_max_seconds": 300,
-                  "oracle_max_attempts": 6, "oracle_base_seconds": 30, "oracle_max_seconds": 900,
-                  "job_max_attempts": 3, "job_base_seconds": 60}
+                  "oracle_max_attempts": 3, "oracle_base_seconds": 30, "oracle_max_seconds": 900,
+                  "job_max_attempts": 1, "job_base_seconds": 60}
 
-_TRANSIENT_STATUS = {404, 408, 409, 425, 429}
-_PERMANENT_STATUS = {400, 401, 403, 413, 422}
+_TRANSIENT_STATUS = {408, 409, 425, 429}
+_PERMANENT_STATUS = {400, 401, 403, 404, 413, 422}
 _TRANSIENT_TEXT = re.compile(
-    r"\b(404|408|409|425|429|5\d\d)\b|rate.?limit|too many requests|timed? ?out|timeout|temporar|"
+    r"\b(408|409|425|429|5\d\d)\b|rate.?limit|too many requests|timed? ?out|timeout|temporar|"
     r"connection (reset|refused|aborted|error)|reset by peer|remote end closed|broken pipe|eof occurred|"
     r"overloaded|bad gateway|service unavailable|gateway time|server error|try again|ssl", re.I)
 _PERMANENT_TEXT = re.compile(
-    r"\b(400|401|403|413|422|1210|1301)\b|invalid api key|authentication|unauthori[sz]ed|permission denied|"
+    r"\b(400|401|403|404|413|422|1210|1301)\b|invalid api key|authentication|unauthori[sz]ed|permission denied|"
     r"content.?filter|context.?length|maximum context|unsupported (image|content)|参数非法", re.I)
 
 
 def policy_from(protocol):
-    return {**DEFAULT_POLICY, **(protocol or {}).get("retry", {})}
+    result = {**DEFAULT_POLICY, **(protocol or {}).get("retry", {})}
+    for key in ("api_max_attempts", "oracle_max_attempts", "job_max_attempts"):
+        if not isinstance(result[key], int) or result[key] < 1:
+            raise ValueError(f"{key} must be a positive integer")
+    return result
 
 
 def is_transient(error):
     """True only for failures that a later identical attempt can plausibly fix."""
+    if re.search(r"insufficient_quota|quota.exceeded|billing.hard.limit|insufficient.balance", str(error), re.I):
+        return False
     status = getattr(error, "status_code", None) or getattr(error, "code", None)
     if isinstance(status, int):
         if status in _PERMANENT_STATUS:
@@ -69,21 +77,31 @@ def is_transient(error):
 def backoff_seconds(attempt, base, cap, retry_after=None):
     if retry_after is not None:
         try:
-            return min(float(retry_after), cap)
+            return max(0.0, float(retry_after))
         except (TypeError, ValueError):
-            pass
+            try:
+                instant = parsedate_to_datetime(str(retry_after))
+                return max(0.0, (instant - datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError):
+                pass
     return min(cap, base * 2 ** attempt) * (0.5 + random.random() / 2)
 
 
-def retry_call(fn, *, attempts, base, cap, describe, log=None, sleep=time.sleep):
+def retry_call(fn, *, attempts, base, cap, describe, log=None, sleep=None):
     """Call fn(); retry transient exceptions. The last exception is re-raised."""
+    sleep = sleep or time.sleep
     for attempt in range(attempts):
         try:
             return fn()
         except Exception as exc:  # noqa: BLE001 - classification decides
             if attempt + 1 >= attempts or not is_transient(exc):
                 raise
-            headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+            source, headers = exc, {}
+            while source is not None:
+                headers = getattr(getattr(source, "response", None), "headers", None) or getattr(source, "headers", None) or {}
+                if headers:
+                    break
+                source = source.__cause__
             delay = backoff_seconds(attempt, base, cap, headers.get("retry-after") if hasattr(headers, "get") else None)
             if log:
                 log({"kind": "transient_retry", "what": describe, "attempt": attempt + 1, "error_type": type(exc).__name__,
@@ -104,14 +122,30 @@ class Journal:
         self.entries, self.seen = {}, {}
         self.hits = self.misses = 0
         if self.path.is_file():
-            for line in self.path.read_text(encoding="utf-8").splitlines():
+            lines = self.path.read_bytes().splitlines(keepends=True)
+            valid_bytes = 0
+            for index, line in enumerate(lines):
                 if not line.strip():
+                    valid_bytes += len(line)
                     continue
                 try:
                     row = json.loads(line)
-                except json.JSONDecodeError:
-                    break  # a torn final line from a crash; everything before it is intact
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    if index != len(lines) - 1:
+                        raise ValueError("Journal has corruption before its last line; refusing to discard completed work")
+                    # Remove the torn tail before appending; otherwise new complete
+                    # records remain hidden behind the same corrupt line on restart.
+                    with self.path.open("r+b") as stream:
+                        stream.truncate(valid_bytes)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    break
                 self.entries.setdefault(row["key"], []).append(row["value"])
+                valid_bytes += len(line)
+            else:
+                if lines and not lines[-1].endswith(b"\n"):
+                    with self.path.open("ab") as stream:
+                        stream.write(b"\n")
 
     def lookup(self, key):
         index = self.seen.get(key, 0)

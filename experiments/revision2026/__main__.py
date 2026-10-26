@@ -14,7 +14,8 @@ from .common import endpoint, load_protocol, read_json, verify_seeds, write_json
 from .sources import PINS, prepare_sources, verify_source
 
 
-def preflight(models, benchmarks, writer=False):
+def preflight(models, benchmarks, writer=False, protocol=None):
+    protocol = protocol or load_protocol()
     if platform.system() != "Linux":
         raise ValueError("Run inside WSL/Linux, not Windows Python or macOS")
     if sys.version_info < (3, 12):
@@ -30,6 +31,9 @@ def preflight(models, benchmarks, writer=False):
         if model in historical and resolved["MODEL"].rsplit("/", 1)[-1].lower() != historical[model]:
             raise ValueError(f"Historical {model} requires {historical[model]}, not a replacement model")
     verify_seeds()
+    if set(models) & set(protocol.get("vision", {}).get("enabled_for", [])):
+        if endpoint("glm_vision")["MODEL"].lower() != protocol["vision"]["model"]:
+            raise ValueError("GLM_VISION_MODEL must match protocol.vision.model")
     for name in set(benchmarks) | {"skillopt"}:
         verify_source(name)
     from .oracles import native_task_ids
@@ -78,11 +82,16 @@ def main(argv=None):
     sub.add_parser("prepare-wildclaw", help="On WSL: download/load the official OpenClaw image and prepare benchmark media")
     doctor = sub.add_parser("preflight")
     doctor.add_argument("--historical", action="store_true", help="Also require original-model endpoints and GPT-6-SOL writer for Table2 rebuilding")
+    doctor.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
+    budget_parser = sub.add_parser("budget", help="Print the audited SkillOpt oracle-execution budget without running models")
+    budget_parser.add_argument("--protocol", type=Path)
     for name in ["pilot", "generalization", "ablation", "table2-rebuild"]:
         p = sub.add_parser(name)
         p.add_argument("--run-dir", type=Path, required=True)
         p.add_argument("--protocol", type=Path)
         p.add_argument("--workers", type=int)
+        if name != "table2-rebuild":
+            p.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
         p.add_argument("--stage", choices=["all", "train", "test"], default="all")
         p.add_argument("--retry-errors", action="store_true", help="Kept for compatibility; failed jobs are retried by default")
         p.add_argument("--no-retry-errors", action="store_true", help="Stop if earlier failed jobs exist instead of retrying them")
@@ -151,12 +160,21 @@ def main(argv=None):
         print(json.dumps([{"kind": k[0], "recorded_status": k[1], "count": n} for k, n in sorted(counts.items())], indent=2))
         return
     protocol = load_protocol(getattr(args, "protocol", None))
+    if args.command == "budget":
+        from .budget import skillopt_budget
+        value = skillopt_budget(protocol)
+        print(json.dumps({"skillopt_per_family": value, "two_models_twenty_families_training_max": value["maximum"] * 40,
+                          "skillopt_heldout_executions": 160, "excluding": "infrastructure retries and LLM-only calls"}, indent=2))
+        return
+    if getattr(args, "models", None):
+        protocol["models"] = list(dict.fromkeys(args.models))
     if args.command == "preflight":
         models = protocol["models"]
         if args.historical:
             from .legacy import HISTORICAL_MODELS
             models = sorted({m for group in HISTORICAL_MODELS.values() for m in group})
-        preflight(models, ["skilllearnbench", "skillsbench", "wildclawbench"], writer=args.historical)
+        benchmarks = ["skilllearnbench", "skillsbench"] + (["wildclawbench"] if args.historical else [])
+        preflight(models, benchmarks, writer=args.historical, protocol=protocol)
         return
     from .runner import ablation_jobs, generalization_jobs, prepare_run, run_jobs, seal_evaluation_plan
     if args.command == "pilot":
@@ -184,7 +202,7 @@ def main(argv=None):
     else:
         benchmarks = ["skillsbench", "wildclawbench"]
     if not args.plan_only:
-        preflight(protocol["models"], benchmarks, writer=args.command == "table2-rebuild")
+        preflight(protocol["models"], benchmarks, writer=args.command == "table2-rebuild", protocol=protocol)
     protocol, config_hash = prepare_run(args.run_dir, protocol)
     if args.command in {"pilot", "generalization"}:
         jobs = generalization_jobs(args.run_dir, protocol, config_hash, stage=args.stage, pilot=args.command == "pilot")

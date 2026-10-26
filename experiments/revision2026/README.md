@@ -2,6 +2,8 @@
 
 本目录交付三个实验的代码、冻结技能、参数和恢复工具。真实模型与 Docker 运行在你的 WSL 机器完成；本机验证是无模型、无 Docker 的代码测试，以及对已有日志的只读恢复检查。
 
+当前优先执行泛化和 SkillsBench 消融，最新配置、图片工具和执行次数见[开跑前审计](AUDIT_2026-10-26.md)。`run_all.sh` 默认仅这两个实验；旧 Table 2 恢复/重建保留为显式入口。
+
 | 实验 | 运行内容 | 主要产物 |
 |---|---|---|
 | 泛化 | **SkillLearnBench**，GLM-5.1 / DeepSeek V4.1-flash，No skill、GPT-6-SOL 技能、官方 SkillOpt 适配、SkillLift；1 次完整演化 | 独立未见实例成绩、CI、配对检验、token/费用记录 |
@@ -39,6 +41,7 @@ WildClaw 还需要官方 OpenClaw 镜像和 workspace 素材；以下才会在�
 将 `experiments/revision2026/.env.example` 中需要的条目写入仓库根目录 `.env`，保留你已有的配置。**不要提交 `.env` 或复制任何真实 key 到命令行。**
 
 - 泛化和消融：`GLM_*`、`DEEPSEEK_*`。官方 `deepseek-flash` 是当前 V4.1 Flash 别名；保存实际请求模型标识，不拿它冒充历史 V4-Pro。
+- 经确认，GLM 各方法共用 `glm-5.3-flash` 图片观察工具。`GLM_VISION_BASE_URL` / `GLM_VISION_API_KEY` 留空时继承 GLM 配置；也可设置独立视觉端点。只向视觉模型发送图片和固定观察提示，主执行模型仍是 GLM-5.1；工具 usage 纳入成本。论文需注明辅助模型，历史 75.1 仅作参考。
 - 完整旧表重建：另外需要 `GPT_SKILLSBENCH_*`（gpt-5.4-mini）、`GPT_WILDCLAW_*`（gpt-5.4）、`DEEPSEEK_PRO_*`（deepseek-v4-pro）。不要把 Flash 填进 Pro 的模型字段。
 - `WRITER_*` 仅供 **table2-rebuild** 生成旧 benchmark 缺失的一次性技能，固定 `WRITER_MODEL=gpt-6-sol`。这要求一个支持该模型 ID 的接口；不能用别的模型静默替代。泛化实验不需要它：20 份 GPT-6-SOL skills 已提交并冻结，不会重新生成。
 - 官方任务声明的 `GH_TOKEN` 等，以及 WildClaw 搜索所需 `BRAVE_API_KEY`，在对应任务运行前必须具备。容器内还必须能访问任务所需外部服务。普通文本 API 可用不代表所有多模态任务都可执行。
@@ -69,6 +72,7 @@ Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，
 - `llm_written` 是本会话 fresh-context GPT-6-SOL 子 agent 生成的 20 份技能，两模型共用。输入来源和未读取资源边界见 `seeds/`。这是无执行反馈的 agent 生成流程，不声称单个原始 API 请求，也不伪造其 token 用量。
 - SkillOpt 和 SkillLift 从同一份冻结 GPT-6-SOL skill 起步。
 - SkillOpt 直接使用固定官方 `ReflACTTrainer + EnvAdapter`。它的中间验收也对训练实例进行全新执行，不把实例 2+ 当 selection。该调整必须在论文中声明。
+- SkillOpt 每家族训练侧 5–11 次逻辑任务执行，默认 3 轮不变；初始验收 2 次，加每轮训练 1 次、候选验收最多 2 次。超出审计上限会报错。`python -m experiments.revision2026 budget` 可复算；这不是旧论文的 32 次预算复现。
 - SkillLift 使用本仓库真实 Mode A/B coordinator。它内部的 `final` 仍是训练实例复评，**不进入最终成绩**。包括 anchor 已成功的任务，外层仍统一进行独立测试。
 - 官方 SkillLearnBench CLI 没有原生 GLM/DeepSeek 通用 API 执行器，本工具使用同一套 OpenAI-compatible Docker tool agent，复用官方环境和 verifier。论文应注明 harness 变化；不能拿官方 Claude harness 的分数直接当这两个模型的无技能分数。
 - Solver 容器启动时不提供隐藏 tests；停止全部 solver 进程后，从容器快照启动独立 scorer，再挂载官方 tests。评分进程异常、缺失/非法 reward 都是 ERROR，不记为有效 0 分。
@@ -138,20 +142,31 @@ $PY -m experiments.revision2026 table2-rebuild \
 - 报告新均值、95% CI、`SkillLift − baseline` 百分点差及差值 CI。
 - 按任务家族和完整 run index 交叉重采样，方法保持配对；新 benchmark 同源实例不能当独立家族。配对置换以家族为单位，适用前提是零假设下方法标签可交换。
 - 所有预先计划的 overall 比较做 Holm 校正；SkillLift 自身是参照行，不填自身 p。
-- 一个旧冻结技能的三次复测，只测执行波动，不变成三次完整演化。新正式协议默认三个完整优化 run；静态基线仅重复执行。
+- 一个旧冻结技能的三次复测，只测执行波动，不变成三次完整演化。当前节省时间的协议只有一个完整优化 run，不估计完整优化的 run 间方差。
 - 置信区间范围、run 数、家族数和缺口保留在结果中，不预设正态分布、显著性或目标提升。
 
 ## 6. 一次启动、续跑与结果
 
-**API 中断自动重试。** 429、404、408、409、425、5xx、连接重置和超时视为暂时性错误：
+在两个 WSL 终端分别运行，自动采用 GLM 并发 4、DeepSeek 并发 8，输出目录按模型分开：
+
+```bash
+# 终端 A
+bash experiments/revision2026/run_all.sh supplementary glm
+# 终端 B
+bash experiments/revision2026/run_all.sh supplementary deepseek
+```
+
+每条依次跑 pilot → generalization → ablation，不启动旧表重建。旧表需显式运行 `run_all.sh rebuild` 或设置 `LEGACY_ARCHIVE` 后运行 `run_all.sh repair`。
+
+**API 中断自动重试。** 429、408、409、425、5xx、连接重置和超时视为暂时性错误：
 
 | 层级 | 位置 | 最多尝试 | 退避 |
 |---|---|---|---|
-| 单次 API 调用 | 求解器、SkillLift/Direct Oracle 的 LLM、SkillOpt 的 LLM | 8 次（框架 LLM 另有内层 4 次） | 5 秒起指数退避，上限 300 秒，带抖动；遵守 Retry-After |
-| 单次 oracle 执行 | 训练中的每次执行、最终独立复测 | 6 次，每次新目录 | 30 秒起，上限 900 秒 |
-| 整个 job | 进程异常退出时自动重启该 job | 3 次 | 60 秒起 |
+| 单次 API 调用 | 泛化 solver、框架及 SkillOpt LLM | 最多 8 次，不再叠加 SDK/内层重试 | 5 秒起指数退避，常规等待上限 300 秒；Retry-After 单独遵守 |
+| 单次 oracle 执行 | 训练中的每次执行、最终独立复测 | 最多 3 次物理执行，coordinator 不再额外叠加 | 30 秒起，上限 900 秒 |
+| 整个 job | 默认失败后停留，修复后重发同一命令续跑 | 每次启动 1 次 | 避免整轮自动重启放大费用 |
 
-400、401、403、413、422、1210/1301、内容过滤、上下文超长不会重试，直接报错。失败的执行从不记为 0 分。求解器因 API 重试等待的时间不计入求解时限。参数在 `protocol.json` 的 `retry`。
+400、401、403、404、413、422、额度耗尽、1210/1301、内容过滤、上下文超长不会自动盲目重试。失败的执行从不记为 0 分。泛化 solver 因 API 重试等待的时间不计入求解时限。SkillsBench 的 OpenHands SDK 原生请求重试为最多 5 次；视觉工具使用 SDK 最多 8 次请求尝试。参数和边界详见审计报告。
 
 **程序中断后续跑。** 直接重跑同一条命令：
 
@@ -159,9 +174,9 @@ $PY -m experiments.revision2026 table2-rebuild \
 - 中断或失败的 job 自动重新运行（默认行为；加 `--no-retry-errors` 才会改为停下）。
 - 训练 cell 的每个已完成 LLM 回复和有效 oracle 执行都实时写入 `<cell>/journal/training.jsonl`（fsync）。重启后同样的请求按原顺序从 journal 返回，优化过程重放到中断点再继续，已执行的 oracle 不会再跑。SkillOpt 的 LLM 调用不在 journal 中，中断的 SkillOpt cell 会重新优化，但相同技能的执行仍会重放。
 - 中断时的工作目录整体移到 `<cell>/attempts/<id>/`，所有日志和产物都保留；token/成本统计包含全部尝试。
-- 不要在同一个 run-dir 中途改代码、协议或端点；身份校验会拒绝续跑。
+- 按作者要求允许代码、协议或端点变化后继续执行，并记录身份历史。科学条件实际变化会标记 `mixed_conditions`，不直接生成混合条件的正式均值、CI 或 p；代码修复本身保留哈希历史，由执行者确认不改变实验定义。
 
-`--stage train` / `--stage test` 可拆开执行；`--plan-only` 只保存计划，不调用模型或 Docker，但仍需要已准备的数据和对应配置身份。不能在同一 run-dir 修改协议、模型路由、依赖或代码。需要改变时，使用新目录。
+`--stage train` / `--stage test` 可拆开执行；`--plan-only` 只保存计划，不调用模型或 Docker，但仍需要已准备的数据和对应配置身份。`--models glm` / `--models deepseek` 可以单模型运行，建议为两个模型分别使用目录。
 
 ```bash
 $PY -m experiments.revision2026 report --run-dir runs/revision2026/generalization
@@ -172,7 +187,7 @@ $PY -m experiments.revision2026 status --run-dir runs/revision2026/generalizatio
 
 各 run 的 `report/` 包含 `overall_statistics.csv`、`paired_comparisons.csv`、`cost_by_method.csv`、`cost_records.csv` 和 JSON 明细。训练/最终执行成本分开，SkillOpt `_total` 不与分阶段统计重复相加；缺失费用为未知，不能写成免费。GPT-6-SOL 子 agent 初始技能生成用量没有接口可核查，因此单独注明未计入，不编造数值。
 
-默认参数在 `protocol.json`：1 个完整 run；泛化每个测试实例执行一次；消融中 DeepSeek 两组每题独立复测两次，GLM 只用过程最好分对照论文；旧表重建每任务三次。SkillLift 三轮、每轮三候选、Mode A/B 各两次。全量旧表重跑明显比恢复复测昂贵；**两天是耗时目标，尚无本机实测保证**。先看 pilot 的时间、内存和 token，再按 Docker Desktop 资源调整 `--workers`，不要为达到时限事后挑题。
+默认参数在 `protocol.json`：1 个完整 run；泛化每个测试实例执行一次；消融中 DeepSeek 两组每题独立复测两次，GLM 只用过程最好分对照论文；旧表重建每任务三次。SkillLift 三轮、每轮三候选、Mode A/B 各两次。全量旧表重跑明显比恢复复测昂贵；**总耗时需由目标机器 pilot 核验，约 6 天只是规划估计**。先看 pilot 的时间、内存和 token，再按 Docker Desktop 资源调整 `--workers`，不要为达到时限事后挑题。
 
 ## 7. 已做与尚未做的验证
 

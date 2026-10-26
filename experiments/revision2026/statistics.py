@@ -86,6 +86,7 @@ def summarize(root, settings):
     root = Path(root)
     expected, records, seen = {}, {}, set()
     manifest = read_json(root / "evaluation_manifest.json")
+    mixed = mixed_conditions(root)
     from .common import digest
     if digest(manifest["evaluations"]) != manifest["plan_hash"]:
         raise ValueError("Evaluation plan hash mismatch")
@@ -111,15 +112,15 @@ def summarize(root, settings):
     for (benchmark, model, method), count in sorted(expected.items()):
         rows = records.get((benchmark, model, method), [])
         table = {"benchmark": benchmark, "model": model, "method": method, "expected": count, "observed_valid": len(rows),
-                 "status": "complete" if len(rows) == count else "incomplete", "mean_percent": None, "ci95": None,
+                 "status": "mixed_conditions" if mixed else "complete" if len(rows) == count else "incomplete", "mean_percent": None, "ci95": None,
                  "p_vs_skilllift": None, "p_holm": None}
         reference = records.get((benchmark, model, "skilllift"), [])
-        if len(rows) == count:
+        if len(rows) == count and not mixed:
             own = paired_inference(rows, rows, settings)
             table.update(mean_percent=own["a_mean_percent"], ci95=own["a_ci95"], families=own["families"], run_indices=own["run_indices"])
         if method != "skilllift":
-            comparison = {"benchmark": benchmark, "model": model, "baseline": method, "status": "missing_complete_pair"}
-            if len(rows) == count and len(reference) == expected.get((benchmark, model, "skilllift"), -1):
+            comparison = {"benchmark": benchmark, "model": model, "baseline": method, "status": "mixed_conditions" if mixed else "missing_complete_pair"}
+            if not mixed and len(rows) == count and len(reference) == expected.get((benchmark, model, "skilllift"), -1):
                 result = paired_inference(reference, rows, settings)
                 comparison.update(status="complete", **result)
                 table["p_vs_skilllift"] = result["p_raw"]
@@ -141,6 +142,14 @@ def summarize(root, settings):
     return tables
 
 
+def mixed_conditions(root):
+    for name, key in (("run_manifest.json", "mixed_scientific_conditions"), ("evaluation_manifest.json", "mixed_conditions")):
+        path = Path(root) / name
+        if path.exists() and read_json(path).get(key):
+            return True
+    return False
+
+
 def cost_report(root):
     root = Path(root)
     rows, native_seen = [], set()
@@ -152,7 +161,7 @@ def cost_report(root):
             kind = event.get("kind")
             if kind == "skillopt_framework_usage":
                 usage = event.get("summary", {}).get("_total", {})
-            elif kind in {"framework_usage", "solver_usage"}:
+            elif kind in {"framework_usage", "solver_usage", "vision_usage"}:
                 usage = event.get("usage") or {}
             elif "usage_record_id" in event and "total_tokens" in event:
                 usage = event
@@ -163,6 +172,7 @@ def cost_report(root):
             else:
                 continue
             rows.append({"source": str(path.relative_to(root)), "kind": kind or event.get("role", "native"),
+                         "execution_model": event.get("response_model") or event.get("model"),
                          "recorded_at": event.get("recorded_at"), "total_tokens": usage.get("total_tokens"),
                          "prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens"),
                          "cost_usd": usage.get("cost_usd", usage.get("cost")),
@@ -199,9 +209,11 @@ def cost_report(root):
         row.update(benchmark=group[0], model=group[1], method=group[2], phase=phase)
         aggregate = groups.setdefault(group, {"benchmark": group[0], "model": group[1], "method": group[2],
             "reported_tokens": 0, "training_tokens": 0, "final_evaluation_tokens": 0,
-            "framework_tokens": 0, "oracle_tokens": 0, "usage_records": 0, "records_without_usage": 0,
+            "framework_tokens": 0, "oracle_tokens": 0, "vision_tokens": 0, "vision_calls": 0, "usage_records": 0, "records_without_usage": 0,
             "reported_cost_usd": 0.0, "records_without_cost": 0})
         aggregate["usage_records"] += 1
+        if row["kind"] == "vision_usage":
+            aggregate["vision_calls"] += 1
         value = row.get("total_tokens")
         if value is None:
             aggregate["records_without_usage"] += 1
@@ -211,6 +223,8 @@ def cost_report(root):
                 aggregate[phase + "_tokens"] += value
             role = "framework" if row["kind"] in {"framework_usage", "skillopt_framework_usage"} else "oracle"
             aggregate[role + "_tokens"] += value
+            if row["kind"] == "vision_usage":
+                aggregate["vision_tokens"] += value
         if isinstance(row.get("cost_usd"), (int, float)):
             aggregate["reported_cost_usd"] += row["cost_usd"]
         else:
@@ -245,6 +259,7 @@ def process_best_report(root):
     manifest = read_json(root / "run_manifest.json")
     from .common import latest_protocol
     protocol = latest_protocol(manifest)
+    mixed = mixed_conditions(root)
     rows, groups = [], {}
     # Rebuild the full training roster so a later `--stage test` plan cannot shrink it.
     for job in ablation_jobs(root, protocol, manifest["config_hash"], stage="train"):
@@ -263,9 +278,9 @@ def process_best_report(root):
         complete = all(item["best_including_internal_final"] is not None for item in items)
         entry = {"benchmark": benchmark, "model": model, "method": method, "source": "this run", "expected": len(items),
                  "observed": sum(item["best_including_internal_final"] is not None for item in items),
-                 "status": "complete" if complete else "incomplete",
+                 "status": "mixed_conditions" if mixed else "complete" if complete else "incomplete",
                  "mean_best_excluding_internal_final_percent": None, "mean_best_including_internal_final_percent": None}
-        if complete:
+        if complete and not mixed:
             for key in ("best_excluding_internal_final", "best_including_internal_final"):
                 entry[f"mean_{key}_percent"] = 100 * float(np.mean([item[key] for item in items]))
         summary.append(entry)
@@ -273,8 +288,8 @@ def process_best_report(root):
         for method, reference in methods.items():
             summary.append({"benchmark": reference["benchmark"], "model": model, "method": method, "source": reference["source"],
                             "expected": reference.get("tasks"), "observed": None, "status": "published",
-                            "mean_best_excluding_internal_final_percent": None,
-                            "mean_best_including_internal_final_percent": reference["mean_percent"],
+                            "mean_best_excluding_internal_final_percent": reference["mean_percent"],
+                            "mean_best_including_internal_final_percent": None,
                             "note": reference["metric"]})
     report = root / "report"
     report.mkdir(exist_ok=True)

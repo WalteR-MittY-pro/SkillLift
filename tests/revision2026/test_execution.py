@@ -19,31 +19,36 @@ def test_task_identifiers_cannot_collide_on_disk(tmp_path):
     assert evaluation_path(spec(tmp_path, "a%2Fb")) != evaluation_path(spec(tmp_path, "a/b"))
 
 
-def test_duplicate_evaluations_rejected_but_changed_rosters_resume_with_history(tmp_path):
+def test_duplicate_evaluations_rejected_but_changed_rosters_marked_mixed(tmp_path):
     one, two = spec(tmp_path, "a/2"), spec(tmp_path, "a/3")
     with pytest.raises(ValueError, match="Duplicate"):
         seal_evaluation_plan(tmp_path, [one, one])
     seal_evaluation_plan(tmp_path, [one, two])
-    seal_evaluation_plan(tmp_path, [one])  # changed plan on resume: accepted, not refused
-    assert len(json.loads((tmp_path / "evaluation_manifest.json").read_text())["evaluations"]) == 1
-    assert (tmp_path / "evaluation_manifest_history.jsonl").read_text().count("replaced_plan_hash") == 1
+    seal_evaluation_plan(tmp_path, [one])
+    assert json.loads((tmp_path / "evaluation_manifest.json").read_text())["mixed_conditions"]
 
 
-def test_resume_accepts_changed_code_protocol_and_endpoint_and_keeps_config_hash(tmp_path, monkeypatch):
+def test_resume_allows_changes_and_marks_changed_endpoint_as_mixed(tmp_path, monkeypatch):
     from experiments.revision2026 import runner
     endpoints = {"glm": {"model": "GLM-5.1", "base_url": "https://a.example/v1"}}
     monkeypatch.setattr(runner, "endpoint_identity", lambda model: endpoints[model])
     protocol = load_protocol()
     protocol["models"] = ["glm"]
+    protocol["vision"]["enabled_for"] = []
     _, first = runner.prepare_run(tmp_path, protocol)
     changed = json.loads(json.dumps(protocol))
     changed["retry"]["api_max_attempts"] = 12
-    endpoints["glm"] = {"model": "GLM-5.1", "base_url": "https://b.example/v1"}
-    monkeypatch.setattr(runner, "code_identity", lambda: "edited-code")
     used, second = runner.prepare_run(tmp_path, changed)
     assert second == first and used["retry"]["api_max_attempts"] == 12
     manifest = json.loads((tmp_path / "run_manifest.json").read_text())
-    assert set(manifest["identity_history"][0]["changed"]) == {"driver_hash", "endpoints", "protocol"}
+    assert set(manifest["identity_history"][0]["changed"]) == {"protocol"}
+    endpoints["glm"] = {"model": "GLM-5.1", "base_url": "https://b.example/v1"}
+    _, resumed = runner.prepare_run(tmp_path, changed)
+    assert resumed == first
+    assert json.loads((tmp_path / "run_manifest.json").read_text())["mixed_scientific_conditions"]
+    endpoints["glm"] = {"model": "GLM-5.1", "base_url": "https://a.example/v1"}
+    monkeypatch.setattr(runner, "code_identity", lambda: "edited-code")
+    assert runner.prepare_run(tmp_path, changed)[1] == first
 
 
 def test_missing_selected_results_do_not_shrink_expected_denominator(tmp_path):
@@ -55,6 +60,16 @@ def test_missing_selected_results_do_not_shrink_expected_denominator(tmp_path):
     rows = summarize(tmp_path, load_protocol()["statistics"])
     assert rows[0]["expected"] == 2 and rows[0]["observed_valid"] == 1
     assert rows[0]["ci95"] is None
+
+
+def test_permissive_resume_does_not_turn_a_reduced_roster_into_complete_statistics(tmp_path):
+    one, two = spec(tmp_path, "a/2"), spec(tmp_path, "a/3")
+    seal_evaluation_plan(tmp_path, [one, two])
+    write_json(evaluation_path(one) / "selected.json", {"status": "OK", "reward": 1, "config_hash": "config", "cell_identity": evaluation_identity(one)})
+    seal_evaluation_plan(tmp_path, [one])
+    rows = summarize(tmp_path, load_protocol()["statistics"])
+    assert rows[0]["status"] == "mixed_conditions" and rows[0]["observed_valid"] == 1
+    assert rows[0]["mean_percent"] is None and rows[0]["ci95"] is None
 
 
 def test_failed_verifier_does_not_become_a_valid_reward(tmp_path, monkeypatch):
@@ -132,7 +147,7 @@ def _direct_oracle_harness(tmp_path, monkeypatch, outcomes, *, max_rounds=3, wid
     # Only the skill generator may exist; requesting a rubricator/verifier would KeyError.
     monkeypatch.setattr(module, "clients", lambda model, ledger, roles, **kwargs: {role: object() for role in roles if role == "skill_generator"} if roles == ("skill_generator",) else pytest.fail("rubric roles requested"))
     protocol = load_protocol()
-    protocol["skilllift"].update(max_rounds=max_rounds, max_candidates_per_round=width)
+    protocol["skilllift"].update(max_rounds=max_rounds, max_candidates_per_round=width, max_consecutive_infra_failures=3)
     winner, details = module.run_direct_oracle(Oracle(), protocol, tmp_path / "run", "glm", tmp_path / "usage.jsonl")
     return winner, details, timeline, json.loads((tmp_path / "run/curve.json").read_text())
 
@@ -203,7 +218,8 @@ def test_process_best_report_keeps_full_denominator_and_published_row(tmp_path, 
     assert new["expected"] == 2 and new["observed"] == 1 and new["status"] == "incomplete"
     assert new["mean_best_including_internal_final_percent"] is None
     published = next(row for row in rows if row["status"] == "published")
-    assert published["method"] == "skilllift" and published["mean_best_including_internal_final_percent"] == 75.1
+    assert published["method"] == "skilllift" and published["mean_best_excluding_internal_final_percent"] == 75.1
+    assert published["mean_best_including_internal_final_percent"] is None
     marker2 = cell_path(tmp_path, "skillsbench", "glm", "direct_oracle", 0, "t2") / "frozen.json"
     write_json(marker2, {"training": {"process_best": {"best_excluding_internal_final": 1.0, "best_including_internal_final": 1.0}}})
     new = next(row for row in process_best_report(tmp_path) if row["source"] == "this run")

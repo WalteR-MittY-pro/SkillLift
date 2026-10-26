@@ -16,7 +16,7 @@ def clients(model, ledger, roles=("rubricator", "skill_generator", "verifier"), 
     ep = endpoint(model)
     policy = policy_from(protocol)
     log = lambda event: append_event(ledger, event)
-    return {role: ResilientLLM(LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=True,
+    return {role: ResilientLLM(LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=True, max_retries=0,
                                          usage_callback=lambda event: append_event(ledger, {"kind": "framework_usage", **event})),
                                policy, journal, log)
             for role in roles}
@@ -249,7 +249,7 @@ def skillopt_config(protocol, root, seed_file, ep, run_index):
                optimizer_backend="openai_compatible", target_backend="openai_compatible",
                optimizer_model=ep["MODEL"], target_model=ep["MODEL"],
                optimizer_openai_compatible_base_url=ep["BASE_URL"], target_openai_compatible_base_url=ep["BASE_URL"],
-               slow_update_gate_with_selection=True)
+               slow_update_gate_with_selection=True, use_slow_update=False, use_meta_skill=False)
     # Official trainer does not redact role-specific API-key fields. Never put
     # secrets in this dictionary: configure the backend in process memory instead.
     return cfg
@@ -261,21 +261,34 @@ def _harden_skillopt(protocol, ledger):
     oracle executions are still replayed from the cell journal."""
     from skillopt.model import openai_compatible_backend as backend
     from .resilience import policy_from, retry_call
+    import inspect
     policy = policy_from(protocol)
-    for name in ("chat_optimizer", "chat_target", "chat_optimizer_messages", "chat_target_messages"):
-        original = getattr(backend, name, None)
-        if original is None or getattr(original, "_revision_retry", False):
-            continue
+    if getattr(backend._chat_messages_impl, "_revision_retry", False):
+        return
+    original_client, original_impl = backend._get_client, backend._chat_messages_impl
+    signature = inspect.signature(original_impl)
 
-        def wrapped(*args, _original=original, _name=name, **kwargs):
-            return retry_call(lambda: _original(*args, **kwargs), attempts=policy["api_max_attempts"], base=policy["api_base_seconds"],
-                              cap=policy["api_max_seconds"], describe=f"skillopt:{_name}", log=lambda event: append_event(ledger, event))
+    def get_client(role):
+        # Trainer may reset the lazy clients after configuration. Wrap each
+        # returned client rather than only the initial cached instance.
+        client = original_client(role).with_options(max_retries=0)
+        def create(**kwargs):
+            return retry_call(lambda: client.chat.completions.create(**kwargs), attempts=policy["api_max_attempts"],
+                              base=policy["api_base_seconds"], cap=policy["api_max_seconds"], describe=f"skillopt:{role}",
+                              log=lambda event: append_event(ledger, event))
+        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
-        wrapped._revision_retry = True
-        setattr(backend, name, wrapped)
+    def wrapped(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        bound.arguments["retries"] = 1  # Official generic loop must not multiply HTTP retries.
+        return original_impl(*bound.args, **bound.kwargs)
+
+    wrapped._revision_retry = True
+    backend._get_client, backend._chat_messages_impl = get_client, wrapped
 
 
 def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None):
+    from .budget import OracleBudget, skillopt_budget
     from skillopt.engine.trainer import ReflACTTrainer
     from skillopt.envs.base import EnvAdapter
     from skillopt.model import configure_openai_compatible, get_token_summary, reset_token_tracker
@@ -285,6 +298,8 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
     if len(seed_files) != 1:
         raise ValueError("SkillLearnBench SkillOpt adaptation requires the single frozen GPT-6-SOL skill per family")
     ep = endpoint(model)
+    budget = skillopt_budget(protocol)
+    execution_budget = OracleBudget(budget["maximum"])
     cfg = skillopt_config(protocol, Path(root) / "official", seed_files[0], ep, run_index)
     configure_openai_compatible(optimizer_base_url=ep["BASE_URL"], optimizer_api_key=ep["API_KEY"], optimizer_model=ep["MODEL"],
                                target_base_url=ep["BASE_URL"], target_api_key=ep["API_KEY"], target_model=ep["MODEL"])
@@ -309,6 +324,7 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
         def rollout(self, env_manager, skill_content, out_dir, **kwargs):
             rows = []
             for _ in range(env_manager.count):
+                execution_budget.consume()
                 name = "execution-" + uuid.uuid4().hex
                 folder = Path(out_dir) / "predictions" / name
                 seed_root = folder / "skill"
@@ -339,4 +355,5 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
     target = Path(root) / "winner"
     shutil.copytree(oracle.seed, target)
     (target / seed_files[0].relative_to(oracle.seed)).write_text(winner.read_text())
-    return target, {"algorithm": "official SkillOpt", "selection": "fresh training-instance executions", "revision": protocol["skillopt"]["revision"]}
+    return target, {"algorithm": "official SkillOpt", "selection": "fresh training-instance executions", "revision": protocol["skillopt"]["revision"],
+                    "oracle_budget": budget, "logical_oracle_executions": execution_budget.used}

@@ -208,7 +208,8 @@ class TrainingOracle:
             if self.instance.number != 1:
                 raise ValueError("Held-out instance passed to optimizer")
             folder = self.root / "oracle" / f"{self.calls:05d}-{uuid.uuid4().hex[:8]}"
-            result = evaluate(self.instance, portfolio.root, self.model, {**self.protocol["solver"], "retry": self.policy}, folder, self.ledger, self.root)
+            result = evaluate(self.instance, portfolio.root, self.model,
+                              {**self.protocol["solver"], "retry": self.policy, "vision": self.protocol.get("vision", {})}, folder, self.ledger, self.root)
             self.last_conversation = public_conversation(folder)
             self.last_feedback = result.get("public_feedback", {"status": result["status"], "error_type": result.get("error_type")})
             self.last_feedback["solver_conversation"] = json.dumps(self.last_conversation, ensure_ascii=False)[-60000:]
@@ -246,10 +247,26 @@ def native_adapter(benchmark, task_id, model, root, protocol):
     ep = endpoint(model)
     root = Path(root)
     if benchmark == "skillsbench":
+        import os
         from skilllift_eval.runners.skillsbench_portfolio_adapter import SkillsBenchPortfolioAdapter, SkillsBenchPortfolioSettings
         patch = ROOT / "scripts" / "oh_skill_patch.py"
         if not patch.is_file():
             raise ValueError("Missing checked-in scripts/oh_skill_patch.py")
+        if model in protocol.get("vision", {}).get("enabled_for", []):
+            from .common import HERE
+            from .resilience import policy_from
+            vision = endpoint("glm_vision")
+            for key, value in vision.items():
+                os.environ[f"SKILLLIFT_VISION_{key}"] = value
+            os.environ["SKILLLIFT_VISION_ATTEMPTS"] = str(policy_from(protocol)["api_max_attempts"])
+            os.environ["SKILLLIFT_VISION_MAX_TOKENS"] = str(protocol["vision"]["max_output_tokens"])
+            root.mkdir(parents=True, exist_ok=True)
+            combined = root / "oh_skill_patch.py"
+            combined.write_text(patch.read_text() + "\n" + (HERE / "vision_bridge.py").read_text() + "\ninstall_openhands_vision()\n")
+            patch = combined
+        else:
+            for suffix in ("MODEL", "BASE_URL", "API_KEY", "ATTEMPTS", "MAX_TOKENS"):
+                os.environ.pop("SKILLLIFT_VISION_" + suffix, None)
         return SkillsBenchPortfolioAdapter(SkillsBenchPortfolioSettings(
             project_root=ROOT, tasks_root=source_path("skillsbench") / "tasks", run_root=root,
             python_executable=Path(sys.executable), model="vllm/" + ep["MODEL"], sandbox="docker",

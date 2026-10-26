@@ -40,3 +40,9 @@
 - 求解器 API 调用、框架 LLM、SkillOpt LLM、训练 oracle 执行、最终复测、整个 job 均有重试；求解器重试等待不计入时限。
 - `run_jobs` 默认跳过已完成 job、自动重跑失败/中断 job；训练 cell 在固定 `work/` 目录运行，中断目录归档到 `attempts/`，重启时重放 journal。
 - 新增测试 20 项，共 56 项通过（Python 3.12），包括：连续 3 次以上 429/404 后成功、永久错误不重试、journal 半行恢复、LLM 重放不调用 API、oracle 重试与重启重放、Direct Oracle 崩溃后续跑不重复执行 oracle、已完成 job 不重启、失败 job 自动重启、独立复测重试。仍未运行 Docker、模型或真实任务；SkillLift 的完整重放需要在试跑中用"中途 kill 再重启"实测确认。
+
+## 两实验、视觉工具与预算审计复查（2026-10-26）
+
+上节是早先提交的验证记录；最新重试上限和 404 分类已按[审计报告](AUDIT_2026-10-26.md)修正。GLM 统一图片观察桥接已覆盖新泛化 solver 与原生 OpenHands formatter，SkillOpt 预算维持 3 轮（每家族最多 11 次），追加超额拦截。宽松续跑按作者确认保留，实际科学条件混合会标明，执行本身继续。
+
+新增实验测试 72 项；加上相关 SkillsBench/OpenHands/WildClaw 回归共 **122 项通过**。覆盖图片转文字、不向视觉模型发送任务目标、重复图片缓存、失败不伪装成功、视觉成本归档、429 后在同一步恢复、SkillOpt 重试不叠乘、执行预算上限、默认脚本不启动旧表、混合条件不生成正式统计。Bash 语法及 diff whitespace 检查通过。运行验证边界仍为离线；没有调用真实图片 API、安装 Docker 或运行真实 benchmark。

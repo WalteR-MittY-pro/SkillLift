@@ -66,8 +66,11 @@ def endpoint(model):
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env", override=False)
     prefix = {"glm": "GLM", "deepseek": "DEEPSEEK", "gpt": "GPT", "gpt_skillsbench": "GPT_SKILLSBENCH",
-              "gpt_wildclaw": "GPT_WILDCLAW", "deepseek_pro": "DEEPSEEK_PRO", "writer": "WRITER"}[model]
+              "gpt_wildclaw": "GPT_WILDCLAW", "deepseek_pro": "DEEPSEEK_PRO", "writer": "WRITER", "glm_vision": "GLM_VISION"}[model]
     values = {key: os.environ.get(f"{prefix}_{key}", "") for key in ("MODEL", "BASE_URL", "API_KEY")}
+    if model == "glm_vision":
+        defaults = {**endpoint("glm"), "MODEL": "glm-5.3-flash"}
+        values = {key: value or defaults[key] for key, value in values.items()}
     missing = [f"{prefix}_{key}" for key, value in values.items() if not value]
     if missing:
         raise ValueError("Missing configuration: " + ", ".join(missing))

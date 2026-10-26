@@ -13,21 +13,21 @@ class HTTPLike(Exception):
         self.status_code = status
 
 
-@pytest.mark.parametrize("error", [HTTPLike(429), HTTPLike(404), HTTPLike(503), TimeoutError("read timed out"),
+@pytest.mark.parametrize("error", [HTTPLike(429), HTTPLike(408), HTTPLike(503), TimeoutError("read timed out"),
                                    "LLM call failed: HTTP Error 429: Too Many Requests", "Connection reset by peer",
                                    "APIConnectionError: Connection error."])
 def test_transient_failures_are_retryable(error):
     assert resilience.is_transient(error)
 
 
-@pytest.mark.parametrize("error", [HTTPLike(400), HTTPLike(401), "Error code: 400 - {'code': '1210', 'message': 'image not supported'}",
+@pytest.mark.parametrize("error", [HTTPLike(400), HTTPLike(401), HTTPLike(404), HTTPLike(429, "insufficient_quota"), "Error code: 400 - {'code': '1210', 'message': 'image not supported'}",
                                    "maximum context length exceeded", "Invalid API key", "Verifier did not write reward.txt"])
 def test_permanent_or_task_failures_are_not_retried(error):
     assert not resilience.is_transient(error)
 
 
-def test_retry_call_survives_more_than_three_429_and_404(monkeypatch):
-    errors = [HTTPLike(429), HTTPLike(429), HTTPLike(404), HTTPLike(429)]
+def test_retry_call_survives_more_than_three_transient_errors(monkeypatch):
+    errors = [HTTPLike(429), HTTPLike(429), HTTPLike(503), HTTPLike(429)]
     sleeps, calls = [], []
 
     def flaky():
@@ -41,6 +41,23 @@ def test_retry_call_survives_more_than_three_429_and_404(monkeypatch):
     with pytest.raises(HTTPLike):
         resilience.retry_call(lambda: (_ for _ in ()).throw(HTTPLike(400)), attempts=8, base=1, cap=10, describe="t", sleep=sleeps.append)
     assert len(sleeps) == 4  # permanent error: no extra sleep
+
+
+def test_retry_after_is_not_shortened_and_date_header_is_supported():
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+    assert resilience.backoff_seconds(0, 1, 10, "45") == 45
+    assert resilience.backoff_seconds(0, 1, 10, "-1") == 0
+    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=45))
+    assert 43 <= resilience.backoff_seconds(0, 1, 10, future) <= 45
+
+
+def test_default_retry_layers_do_not_multiply_full_task_runs():
+    protocol = load_protocol()
+    assert protocol["retry"]["api_max_attempts"] == 8
+    assert protocol["retry"]["oracle_max_attempts"] == 3
+    assert protocol["skilllift"]["max_consecutive_infra_failures"] == 1
+    assert protocol["retry"]["job_max_attempts"] == 1
 
 
 def test_journal_is_occurrence_indexed_survives_torn_lines_and_releases_failures(tmp_path):
@@ -57,6 +74,9 @@ def test_journal_is_occurrence_indexed_survives_torn_lines_and_releases_failures
     replay = resilience.Journal(path)
     assert replay.lookup("k") == (True, {"n": 1}) and replay.lookup("k") == (True, {"n": 2})
     assert replay.lookup("k") == (False, None)
+    replay.record("k", {"n": 3})
+    restarted = resilience.Journal(path)
+    assert [restarted.lookup("k")[1] for _ in range(3)] == [{"n": 1}, {"n": 2}, {"n": 3}]
 
 
 def test_resilient_llm_replays_identical_prompts_without_calling_the_api(tmp_path):
@@ -118,15 +138,15 @@ def test_training_oracle_retries_transient_failures_and_replays_after_restart(tm
     from skilllift.coordinator import TrialSpec
     monkeypatch.setattr("time.sleep", lambda seconds: None)
     seed = _seed(tmp_path)
-    native = FakeNative(tmp_path / "native", [None, None, None, 0.4])  # three 429s, then a real execution
+    native = FakeNative(tmp_path / "native", [None, None, 0.4])
     oracle = _oracle(tmp_path, native, resilience.Journal(tmp_path / "cell/journal.jsonl"), seed)
     portfolio = oracle.seed_portfolio("task")
     result = oracle.evaluate("task", portfolio, TrialSpec("anchor-x", "anchor", 0))
-    assert result.is_valid and result.reward == 0.4 and native.live == 4
+    assert result.is_valid and result.reward == 0.4 and native.live == 3
     restarted = _oracle(tmp_path, FakeNative(tmp_path / "native2", []), resilience.Journal(tmp_path / "cell/journal.jsonl"), seed)
     again = restarted.evaluate("task", portfolio, TrialSpec("anchor-x", "anchor", 0))
     assert again.reward == 0.4 and restarted.replayed == 1 and restarted.native.live == 0
-    assert "trace 4" in restarted.last_feedback["solver_conversation"]
+    assert "trace 3" in restarted.last_feedback["solver_conversation"]
 
 
 def test_direct_oracle_resumes_after_crash_without_repeating_oracle_executions(tmp_path, monkeypatch):
@@ -172,6 +192,7 @@ def test_run_jobs_skips_finished_work_and_relaunches_failed_jobs(tmp_path, monke
     from experiments.revision2026 import runner
     monkeypatch.setattr("time.sleep", lambda seconds: None)
     protocol = load_protocol()
+    protocol["retry"]["job_max_attempts"] = 3  # Explicit opt-in; default avoids multiplying whole-task attempts.
     common = dict(benchmark="skillsbench", model="glm", method="direct_oracle", run=0, root=str(tmp_path), protocol=protocol, config_hash="cfg")
     done = {**common, "kind": "train", "family": "done"}
     todo = {**common, "kind": "train", "family": "todo"}
