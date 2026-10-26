@@ -37,56 +37,193 @@ def run_skilllift(oracle, protocol, root, model, ledger):
                                          "internal_final_is_training": True}
 
 
+DIRECT_ORACLE_INSTRUCTION = (
+    "Improve this reusable skill using actual oracle execution feedback; there is no rubric. "
+    "Edit the CURRENT skill (current_skill_hash). Its own execution trace and per-criterion oracle outcomes are in "
+    "current_skill_feedback. previous_round_candidates are earlier edits that were executed by the oracle; they may "
+    "differ from the current skill, so use their outcomes as evidence but respect their hashes. "
+    "already_proposed_this_round lists sibling edits generated for this round that have not been executed yet: "
+    "take a clearly different approach from them (address different failed criteria or failure modes). "
+    "Do not invent a rubric, do not hard-code answers, and keep the skill reusable for other instances of this task family.\n"
+)
+
+
+def _criterion_pass_fraction(feedback):
+    """Oracle-derived tie-break: share of verifier criteria that passed, or None if unavailable."""
+    rows = [row for row in (feedback or {}).get("oracle_criterion_outcomes") or [] if isinstance(row, dict)]
+    if not rows:
+        return None
+    return sum(str(row.get("status", "")).lower() == "passed" for row in rows) / len(rows)
+
+
+def _ledger_tokens(ledger):
+    """Cumulative recorded usage at this moment; missing usage stays unknown, never zero."""
+    totals = {"framework_tokens": 0, "oracle_tokens": 0, "records_without_usage": 0}
+    path = Path(ledger)
+    if not path.is_file():
+        return totals
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        role = {"framework_usage": "framework_tokens", "solver_usage": "oracle_tokens"}.get(event.get("kind"))
+        if role is None:
+            continue
+        value = (event.get("usage") or {}).get("total_tokens")
+        if isinstance(value, (int, float)):
+            totals[role] += value
+        else:
+            totals["records_without_usage"] += 1
+    return totals
+
+
+def _fit_payload(payload, limit):
+    """Keep the feedback prompt inside the generator context: trim the oldest part of the
+    champion's solver trace first (its tail holds the final actions and outcome)."""
+    text = json.dumps(payload, ensure_ascii=False)
+    feedback = payload.get("current_skill_feedback") or {}
+    trace = str(feedback.get("solver_conversation", ""))
+    if len(text) <= limit or not trace:
+        return text, False
+    keep = max(0, len(trace) - (len(text) - limit) - 80)  # 80: room for the truncation marker field
+    payload = {**payload, "current_skill_feedback": {**feedback, "solver_conversation": trace[len(trace) - keep:],
+                                                     "solver_conversation_truncated_chars": len(trace) - keep}}
+    return json.dumps(payload, ensure_ascii=False), True
+
+
 def run_direct_oracle(oracle, protocol, root, model, ledger):
+    """Direct Oracle ablation with the same oracle structure as SkillLift.
+
+    SkillLift spends oracle rollouts only on the K candidates of each round (its inner
+    edits are scored by the rubric, not the oracle). This arm removes the rubricator,
+    verifier and rank alignment and, per round, generates the same K candidates from the
+    current champion, one bounded edit each, and executes each candidate once. Selection,
+    acceptance, infrastructure retries and stopping mirror the SkillLift coordinator; the
+    rubric/verifier tie-break is replaced by the oracle's own criterion pass fraction.
+    """
     from skilllift.coordinator import TrialSpec
     from skilllift.portfolio import SearchDirection, apply_portfolio_patch
     from skilllift_eval.runners.bounded_edits_skill_generator import BoundedEditsSkillGenerator
     from skilllift.errors import SkillLiftError
-    config = protocol["skilllift"]
+    config, rules = protocol["skilllift"], protocol["direct_oracle"]
+    if rules["edits_per_candidate"] != 1 or rules["structure"] != "matched_to_skilllift":
+        raise ValueError("The agreed Direct Oracle protocol uses one oracle-evaluated edit per candidate")
+    rounds, width = int(config["max_rounds"]), int(config["max_candidates_per_round"])
+    infra_limit = int(config.get("max_consecutive_infra_failures", 3))  # SkillLift CoordinatorConfig default
+    excerpt = int(rules["patch_excerpt_chars"])
+    spec = oracle.reward_spec()
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
     generator = BoundedEditsSkillGenerator(clients(model, ledger, ("skill_generator",))["skill_generator"], max_input_chars=config["max_context_chars"])
-    best = oracle.seed_portfolio(oracle.family)
-    anchor = oracle.evaluate(oracle.family, best, TrialSpec("direct-anchor", "anchor", 0))
-    if not anchor.is_valid:
-        raise RuntimeError("Direct Oracle anchor failed: " + str(anchor.infrastructure_error))
-    score, no_improvement = anchor.reward, 0
-    feedback_by_hash = {best.tree_hash: dict(oracle.last_feedback)}
-    if score >= 1:
-        return best.root, {"stop_reason": "anchor_terminal", "rounds": 0}
-    for round_id in range(config["max_rounds"]):
-        champion, champion_score = best, score
-        round_feedback = feedback_by_hash[best.tree_hash]
-        for candidate in range(config["max_candidates_per_round"]):
-            branch, branch_score, feedback = champion, champion_score, round_feedback
-            for edit in range(1 + config["mode_a_iters"]):
+    task = oracle.public_task(oracle.family)
+    counters = {"oracle_rollouts": 0, "generator_calls": 0}
+
+    def evaluate(portfolio, label, phase, round_index=None):
+        # Like the SkillLift coordinator: an infrastructure failure is retried on the same
+        # candidate and never becomes a score; after the fuse trips the candidate is dropped.
+        for attempt in range(infra_limit):
+            counters["oracle_rollouts"] += 1
+            result = oracle.evaluate(oracle.family, portfolio, TrialSpec(f"{label}-a{attempt}", phase, attempt, round_index=round_index, candidate_id=label))
+            if result.is_valid:
+                feedback = dict(oracle.last_feedback)
                 if feedback.get("trace_missing"):
                     raise RuntimeError("Direct Oracle needs this trial's actual execution feedback; refusing a score-only substitute")
-                label = f"direct-r{round_id}-c{candidate}-e{edit}"
-                scopes = tuple(sorted(path.name for path in branch.root.iterdir() if path.is_dir()))
-                direction = SearchDirection(label, "execution-feedback", "Improve this reusable skill using actual execution feedback. The last attempted candidate can differ from the current best skill; respect their hashes. Do not invent a rubric.\n" + json.dumps({"current_skill_hash": branch.tree_hash, "last_attempt_feedback": feedback}, ensure_ascii=False),
-                                            "correct execution", scopes, None, (oracle.public_task(oracle.family).evidence_ref,), label)
-                try:
-                    patch = generator.generate(oracle.public_task(oracle.family), direction, branch)
-                    proposed = apply_portfolio_patch(branch, patch, Path(root) / label, target_scope=scopes).portfolio
-                except SkillLiftError as exc:
-                    append_event(ledger, {"kind": "invalid_candidate", "candidate": label, "error_type": type(exc).__name__})
-                    break
-                result = oracle.evaluate(oracle.family, proposed, TrialSpec(label, "candidate", 0, round_index=round_id, candidate_id=label))
-                if not result.is_valid:
-                    raise RuntimeError("Direct Oracle execution failed: " + str(result.infrastructure_error))
-                feedback = dict(oracle.last_feedback)
-                feedback["evaluated_skill_hash"] = proposed.tree_hash
-                feedback_by_hash[proposed.tree_hash] = feedback
-                if result.reward > branch_score:
-                    branch, branch_score = proposed, result.reward
-                if branch_score >= 1:
-                    break
-            if branch_score > score:
-                best, score = branch, branch_score
-        no_improvement = no_improvement + 1 if score <= champion_score else 0
-        write_json(Path(root) / f"round-{round_id}.json", {"reward": score, "winner": best.tree_hash, "no_improvement": no_improvement})
-        if score >= 1 or no_improvement >= 2:
-            return best.root, {"stop_reason": "terminal_candidate" if score >= 1 else "two_no_improvement_rounds", "rounds": round_id + 1}
-    return best.root, {"stop_reason": "round_budget_exhausted", "rounds": config["max_rounds"]}
+                feedback["evaluated_skill_hash"] = portfolio.tree_hash
+                return spec.validate(result.reward), feedback
+            append_event(ledger, {"kind": "oracle_infrastructure_failure", "candidate": label, "attempt": attempt,
+                                  "error": str(result.infrastructure_error)[:500]})
+        return None, None
+
+    def summary(item):
+        feedback = item["feedback"]
+        return {"candidate": item["label"], "skill_hash": item["portfolio"].tree_hash, "reward": item["reward"],
+                "criterion_pass_fraction": item["fraction"],
+                "oracle_criterion_outcomes": feedback.get("oracle_criterion_outcomes", []),
+                "solver_last_message": str(feedback.get("solver_last_message", ""))[-2000:],
+                "patch_excerpt": item["patch"][:excerpt]}
+
+    curve = []
+
+    def record(round_index, accept_reason, stop_reason, extra=None):
+        point = {"round_index": round_index, "champion_hash": champion.tree_hash, "champion_reward": champion_reward,
+                 "champion_criterion_pass_fraction": champion_fraction, "accept_reason": accept_reason, "stop_reason": stop_reason,
+                 "oracle_rollouts_cumulative": counters["oracle_rollouts"], "generator_calls_cumulative": counters["generator_calls"],
+                 **_ledger_tokens(ledger), **(extra or {})}
+        curve.append(point)
+        write_json(root / "curve.json", curve)
+        if round_index >= 0:
+            write_json(root / f"round-{round_index}.json", point)
+
+    champion = oracle.seed_portfolio(oracle.family)
+    champion_reward, champion_feedback = evaluate(champion, "direct-anchor", "anchor")
+    if champion_reward is None:
+        raise RuntimeError("Direct Oracle anchor did not yield a valid oracle result")
+    champion_fraction = _criterion_pass_fraction(champion_feedback)
+    if spec.is_terminal(champion_reward):
+        record(-1, None, "anchor_terminal")
+        return champion.root, {"stop_reason": "anchor_terminal", "rounds": 0, **counters}
+    record(-1, None, None)
+    previous_round, no_improvement, stop_reason, completed = [], 0, "round_budget_exhausted", 0
+    for round_index in range(rounds):
+        scopes = tuple(sorted(path.name for path in champion.root.iterdir() if path.is_dir()))
+        proposed, invalid = [], 0
+        # Phase 1: generate all K siblings from the same champion and the same evidence,
+        # as SkillLift does; siblings see each other's patches only for diversity.
+        for index in range(width):
+            label = f"direct-r{round_index}-c{index}"
+            payload = {"candidate_slot": f"{index + 1} of {width}", "current_skill_hash": champion.tree_hash,
+                       "current_skill_reward": champion_reward, "current_skill_feedback": champion_feedback,
+                       "previous_round_candidates": previous_round,
+                       "already_proposed_this_round": [{"candidate": p["label"], "patch_excerpt": p["patch"][:excerpt]} for p in proposed]}
+            text, trimmed = _fit_payload(payload, int(rules["max_feedback_chars"]))
+            if trimmed:
+                append_event(ledger, {"kind": "direct_oracle_feedback_trimmed", "candidate": label})
+            direction = SearchDirection(label, "execution-feedback", DIRECT_ORACLE_INSTRUCTION + text,
+                                        "correct execution", scopes, None, (task.evidence_ref,), label)
+            try:
+                counters["generator_calls"] += 1
+                patch = generator.generate(task, direction, champion)
+                candidate = apply_portfolio_patch(champion, patch, root / label, target_scope=scopes).portfolio
+            except SkillLiftError as exc:
+                invalid += 1
+                append_event(ledger, {"kind": "invalid_candidate", "candidate": label, "error_type": type(exc).__name__})
+                continue
+            proposed.append({"label": label, "portfolio": candidate, "patch": patch})
+        # Phase 2: one oracle execution per valid candidate (same count as SkillLift's round).
+        evaluated = []
+        for item in proposed:
+            reward, feedback = evaluate(item["portfolio"], item["label"], "candidate", round_index)
+            if reward is not None:
+                evaluated.append({**item, "reward": reward, "feedback": feedback, "fraction": _criterion_pass_fraction(feedback)})
+        completed = round_index + 1
+        accept_reason = None
+        if evaluated:
+            winner = max(evaluated, key=lambda item: (item["reward"], -1 if item["fraction"] is None else item["fraction"]))
+            if spec.improves(winner["reward"], champion_reward):
+                accept_reason = "oracle_improved"
+            elif (winner["reward"] == champion_reward and winner["fraction"] is not None and champion_fraction is not None
+                  and winner["fraction"] > champion_fraction):
+                accept_reason = "criterion_tiebreak"
+            if accept_reason:
+                champion, champion_reward = winner["portfolio"], winner["reward"]
+                champion_fraction, champion_feedback = winner["fraction"], winner["feedback"]
+        no_improvement = 0 if accept_reason else no_improvement + 1
+        previous_round = [summary(item) for item in evaluated]
+        stop = None
+        if not evaluated:
+            stop = "all_candidates_invalid"
+        elif accept_reason and spec.is_terminal(champion_reward):
+            stop = "terminal_candidate"
+        elif no_improvement >= 2:
+            stop = "two_no_improvement_rounds"
+        elif round_index + 1 >= rounds:
+            stop = "round_budget_exhausted"
+        record(round_index, accept_reason, stop, {"candidates_generated": width, "candidates_invalid": invalid,
+                                                  "candidates_evaluated": len(evaluated), "no_improvement_rounds": no_improvement})
+        if stop:
+            stop_reason = stop
+            break
+    return champion.root, {"stop_reason": stop_reason, "rounds": completed, "structure": "matched_to_skilllift", **counters}
 
 
 def skillopt_config(protocol, root, seed_file, ep, run_index):

@@ -167,6 +167,9 @@ def main(argv=None):
         if not plan["assets"]:
             raise ValueError("No verified recoverable assets. Review the audit or use explicit table2-rebuild.")
         protocol["repair_plan_hash"] = __import__("hashlib").sha256(args.plan.read_bytes()).hexdigest()
+    if args.command == "ablation" and not protocol["ablation"]["benchmarks"]:
+        raise ValueError("The agreed Direct Oracle ablation runs inside `generalization` on SkillLearnBench (method direct_oracle); "
+                         "the native SkillsBench/WildClaw ablation is disabled in protocol.json")
     benchmarks = ["skilllearnbench"] if args.command in {"pilot", "generalization"} else ["skillsbench", "wildclawbench"]
     if not args.plan_only:
         preflight(protocol["models"], benchmarks, writer=args.command == "table2-rebuild")

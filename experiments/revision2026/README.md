@@ -4,8 +4,8 @@
 
 | 实验 | 运行内容 | 主要产物 |
 |---|---|---|
-| 泛化 | **SkillLearnBench**，GLM-5.1 / DeepSeek V4.1-flash，No skill、作者人工技能、GPT-6-SOL 技能、官方 SkillOpt 适配、SkillLift | 独立未见实例成绩、CI、配对检验、token/费用记录 |
-| Direct Oracle 消融 | **SkillsBench + WildClawBench**，相同两模型，完整 SkillLift / Direct Oracle | 独立最终复测、成绩差异、实际训练及评测成本 |
+| 泛化 | **SkillLearnBench**，GLM-5.1 / DeepSeek V4.1-flash，No skill、GPT-6-SOL 技能、官方 SkillOpt 适配、SkillLift；1 次完整演化 | 独立未见实例成绩、CI、配对检验、token/费用记录 |
+| Direct Oracle 消融 | **与泛化同一次运行**（SkillLearnBench，方法 `direct_oracle`），与 SkillLift 共用种子、执行器、训练实例和测试名单 | 未见实例成绩差、逐轮 oracle 次数/token 曲线、实际成本 |
 | Table 2 统计 | 恢复旧技能并补独立评测；无法恢复时可完整重跑旧表的 3 模型 × 6 方法 × 2 benchmark | 36 项可用性审计、新均值和 CI、配对差值和 Holm 校正 p |
 
 ## 1. 在 WSL 准备环境
@@ -59,13 +59,13 @@ $PY -m experiments.revision2026 pilot --run-dir runs/revision2026/pilot --worker
 $PY -m experiments.revision2026 generalization --run-dir runs/revision2026/generalization --workers 4
 ```
 
-Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，覆盖五种方法，优化预算缩小为一轮。它用于暴露接入/成本/耗时问题，不用于论文最终统计，也不能靠两个任务证明无技能分数在 30–60。
+Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，覆盖 protocol 中的全部方法，优化预算缩小为一轮。它用于暴露接入/成本/耗时问题，不用于论文最终统计，也不能靠两个任务证明无技能分数在 30–60。
 
 正式协议锁定 20 个任务家族、100 个官方实例：每类 **实例 1 训练**，其余共 **80 个实例测试**。测试 roster 和 instruction Git blob 固定，不将后来添加的文件自动纳入测试。所有训练阶段完成后才开始测试。优化器永远只能调用实例 1，最终测试反馈不回流。
 
 **方法边界：**
 
-- `human_written` 是作者提供的参考技能，不宣称作者只接触过训练实例。
+- 2026-10-26 起正式方法为 `no_skill`、`llm_written`、`skillopt`、`skilllift`、`direct_oracle`，只做 **1 次**完整演化（时间限制；不估计演化间波动）。`human_written` 代码仍在，但不在正式方法列表中；若加回，它是作者提供的参考技能，不宣称作者只接触过训练实例。
 - `llm_written` 是本会话 fresh-context GPT-6-SOL 子 agent 生成的 20 份技能，两模型共用。输入来源和未读取资源边界见 `seeds/`。这是无执行反馈的 agent 生成流程，不声称单个原始 API 请求，也不伪造其 token 用量。
 - SkillOpt 和 SkillLift 从同一份冻结 GPT-6-SOL skill 起步。
 - SkillOpt 直接使用固定官方 `ReflACTTrainer + EnvAdapter`。它的中间验收也对训练实例进行全新执行，不把实例 2+ 当 selection。该调整必须在论文中声明。
@@ -73,17 +73,22 @@ Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，
 - 官方 SkillLearnBench CLI 没有原生 GLM/DeepSeek 通用 API 执行器，本工具使用同一套 OpenAI-compatible Docker tool agent，复用官方环境和 verifier。论文应注明 harness 变化；不能拿官方 Claude harness 的分数直接当这两个模型的无技能分数。
 - Solver 容器启动时不提供隐藏 tests；停止全部 solver 进程后，从容器快照启动独立 scorer，再挂载官方 tests。评分进程异常、缺失/非法 reward 都是 ERROR，不记为有效 0 分。
 
-## 4. Direct Oracle 消融
+## 4. Direct Oracle 消融（在 SkillLearnBench 泛化运行中）
 
-```bash
-$PY -m experiments.revision2026 ablation --run-dir runs/revision2026/ablation --workers 4
-```
+2026-10-26 起，消融不再在 SkillsBench/WildClaw 上单独运行（`ablation` 命令在 protocol 中禁用）。`direct_oracle` 是 `generalization` 的一个方法，与 `skilllift` 使用同一份 GPT-6-SOL 初始技能、同一执行器、只用实例 1 训练，并在同一组 80 个未见实例上测试。统计报告会自动给出 Direct Oracle 相对 SkillLift 的配对差值、CI 和 Holm 校正 p。
 
-两模型分别在 SkillsBench、WildClawBench 上运行两组，使用各 benchmark 同一份原生初始技能、相同执行器、最大轮数、候选数、编辑机会和共同早停规则。
+**结构与 SkillLift 对齐（方案 A）。** SkillLift 每轮只在 K 个候选上花 oracle（内部修改由 rubric 打分）。`direct_oracle` 去掉 rubricator、verifier 和 rank alignment，每轮：
 
-`direct_oracle` **不调用 rubric 生成、verifier 或 rubric 对齐**，每次候选修改后真实执行 oracle，把本次 public solver 轨迹及分数反馈给生成器。不是把 `mode_b_iters` 改成 0。反馈缺失会失败，不降级成假称“完整反馈”的纯分数基线；隐藏评分源码、答案和模型 thought 不作为反馈。
+1. 从当前 champion 生成 K 个候选（`max_candidates_per_round`，默认 3），**每个候选只做 1 次 bounded edit**。K 个候选全部生成完才开始执行；后生成的候选能看到同轮已生成的补丁，用于避免重复，但看不到它们的执行结果。
+2. 每个有效候选真实执行 1 次 oracle。
+3. 选分数最高者；分数更高则接受。分数相同时，若通过的 verifier 测试项比例更高也接受（替代 SkillLift 的 verifier tie-break，信息仍只来自 oracle）。
+4. 停止规则与 SkillLift coordinator 相同：anchor_terminal、terminal_candidate、连续 2 轮无提升、轮数用完、全部候选无效。
 
-两组跑到各自共同规则规定的结束点后，冻结技能，再统一做独立最终复测。没有等 token 截断；记录实际 token、oracle 次数和成本。原生 WildClaw wrapper 的 judge/oracle 端点选择保留其当前实现并记录模型身份；不将新运行当作旧论文评测协议已经复现。
+因此每个 cell 最多 `1 + max_rounds × K` = 10 次 oracle（不含基础设施重试）。基础设施失败与 SkillLift 一样在同一候选上重试，最多 3 次，失败从不记为 0 分。
+
+**生成器收到的反馈**：当前 champion 的分数、求解状态、执行轨迹（超长时从最早部分截断，总量受 `max_feedback_chars` 限制）、最后回复、逐项测试通过/失败；上一轮已执行候选的分数、逐项结果、最后回复片段和补丁片段。不提供测试源码、断言细节、参考答案、模型 thought 或任何测试实例信息。这比 SkillLift 生成器多了逐项测试结果，论文中需注明。
+
+**逐轮曲线**：每个 cell 的 `attempts/<id>/curve.json` 记录每轮 champion 分数、累计 oracle 次数、累计生成器调用和累计 token，用于审稿人 4 要求的性能–成本对比。
 
 ## 5. 补齐 Table 2 的统计数据
 

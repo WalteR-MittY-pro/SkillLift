@@ -21,7 +21,7 @@ if [[ -n "${LEGACY_ARCHIVE:-}" ]]; then
 fi
 "$PY" -m experiments.revision2026 pilot --run-dir "$RUN_ROOT/pilot" --workers "$WORKERS"
 "$PY" -m experiments.revision2026 generalization --run-dir "$RUN_ROOT/generalization" --workers "$WORKERS"
-"$PY" -m experiments.revision2026 ablation --run-dir "$RUN_ROOT/ablation" --workers "$WORKERS"
+# Direct Oracle ablation now runs inside `generalization` (SkillLearnBench, method direct_oracle).
 if [[ "$MODE" == rebuild ]]; then
   "$PY" -m experiments.revision2026 table2-rebuild --run-dir "$RUN_ROOT/table2-fresh" --workers "$WORKERS"
 else

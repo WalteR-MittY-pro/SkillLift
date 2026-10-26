@@ -21,3 +21,9 @@
 同日新增只读审计 `skilllift_glm51_verification_logs/`：确认 60 题覆盖、40 题有 final 证据；32 份评分有明确异常标志，其中 final 7 份、涉及 4 题。审计和逐题补跑范围见 `legacy_evidence/wildclaw_glm51_verification.md`。新增对 WildClaw judge 报错但仍返回数值成绩的拒绝检查；参数化回归测试覆盖三种实际错误字段，并确认正常任务惩罚项不被误判。
 
 此时新增实验测试为 29 项，合并相关原生适配器回归共 **60 项通过**。本次仍未执行模型、Docker 或新的付费实验。
+
+## Direct Oracle 方案 A 与范围调整（2026-10-26）
+
+- `run_direct_oracle` 改为与 SkillLift 相同的 oracle 结构：每轮 K 个候选、每个 1 次修改、1 次 oracle；先生成全部候选再执行；同样的接受、基础设施重试和停止规则；分数相同时用 oracle 逐项通过比例做 tie-break；记录逐轮曲线。
+- protocol：`evolution_runs` 1；SkillLearnBench 方法为 no_skill / llm_written / skillopt / skilllift / direct_oracle；原生 SkillsBench/WildClaw `ablation` 禁用（`run_all.sh` 不再调用）。
+- 新增/更新测试：结构与调用顺序、10 次上限、tie-break、同候选重试、anchor 直接终止、反馈截断、`ablation` 命令禁用、计划规模。本机 Python 3.12 下 `tests/revision2026` 共 34 项通过。仍未运行 Docker、模型或真实任务。

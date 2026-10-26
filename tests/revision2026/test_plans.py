@@ -5,13 +5,17 @@ from experiments.revision2026.common import load_protocol, tree_hash, write_json
 from experiments.revision2026.sources import Instance
 
 
-def test_generalization_has_all_five_groups_and_no_seed_in_test(tmp_path, monkeypatch):
+def test_generalization_has_agreed_groups_one_run_and_no_seed_in_test(tmp_path, monkeypatch):
     tasks = [Instance(f"family{i}", n, tmp_path / f"family{i}-{n}") for i in range(20) for n in range(1, 6)]
     monkeypatch.setattr(runner, "instances", lambda: tasks)
-    jobs = runner.generalization_jobs(tmp_path, load_protocol(), "cfg")
+    protocol = load_protocol()
+    assert protocol["skilllearnbench"]["methods"] == ["no_skill", "llm_written", "skillopt", "skilllift", "direct_oracle"]
+    jobs = runner.generalization_jobs(tmp_path, protocol, "cfg")
     counts = Counter(job["kind"] for job in jobs)
-    assert counts == {"train": 600, "evaluate": 2400}
+    # 2 models x 5 methods x 1 run x 20 families; 4 held-out instances per mock family.
+    assert counts == {"train": 200, "evaluate": 800}
     assert all(job["instance"] > 1 for job in jobs if job["kind"] == "evaluate")
+    assert {job["run"] for job in jobs} == {0}
     assert len({(job["model"], job["method"]) for job in jobs}) == 10
 
 

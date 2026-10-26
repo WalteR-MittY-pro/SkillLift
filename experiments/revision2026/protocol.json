@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
   "models": ["glm", "deepseek"],
-  "evolution_runs": 3,
+  "evolution_runs": 1,
   "test_repeats": 1,
   "workers": 4,
   "solver": {"max_steps": 100, "timeout_seconds": 1800, "command_timeout_seconds": 120, "max_output_tokens": 16384, "temperature": 0.0},
   "skilllearnbench": {
     "revision": "726e1f79b96b0cb3d729d0e55a1c847e0b5353ae",
     "train_instance": 1,
-    "methods": ["no_skill", "human_written", "llm_written", "skillopt", "skilllift"],
+    "methods": ["no_skill", "llm_written", "skillopt", "skilllift", "direct_oracle"],
+    "method_scope_note": "human_written omitted by author decision (2026-10-26); direct_oracle is the rubric-free ablation sharing the SkillLift arm, seeds, executor, instance-1 training and held-out roster",
     "pilot_families": ["court-form-filling", "weighted-gdp-calculation"],
     "claim": "held-out instances within seen task families",
     "human_written_label": "author-provided reference skills; train-only authorship not established",
@@ -16,7 +17,13 @@
   },
   "skilllift": {"max_rounds": 3, "max_candidates_per_round": 3, "candidate_concurrency": 1, "mode_a_iters": 2, "mode_b_iters": 2, "mode_a_min_score_threshold": 0.85, "rank_alignment_threshold": 0.9, "max_context_chars": 120000, "final_trials": 2},
   "skillopt": {"revision": "84b36cd5564e8893569e50e37f02a81d10b55e27", "num_epochs": 3, "edit_budget": 4, "min_edit_budget": 2, "merge_batch_size": 8, "sel_env_num": 2, "analyst_workers": 1, "selection_protocol": "fresh executions of instance 1; no held-out selection instances"},
-  "ablation": {"benchmarks": ["skillsbench", "wildclawbench"], "methods": ["skilllift", "direct_oracle"], "final_repeats": 3, "matched_token_cap": false},
+  "direct_oracle": {"structure": "matched_to_skilllift", "edits_per_candidate": 1, "patch_excerpt_chars": 4000, "max_feedback_chars": 70000,
+    "rounds_and_candidates": "same max_rounds and max_candidates_per_round as skilllift; one oracle execution per valid candidate; at most 1 + max_rounds * max_candidates_per_round rollouts per cell before infrastructure retries",
+    "acceptance": "oracle reward improves; on equal reward, a higher oracle criterion pass fraction (replaces the SkillLift verifier tie-break)",
+    "stopping": "same as the SkillLift coordinator: anchor_terminal, terminal_candidate, two_no_improvement_rounds, round_budget_exhausted, all_candidates_invalid",
+    "infrastructure_retries": "same candidate retried up to the SkillLift max_consecutive_infra_failures (default 3); an infrastructure failure is never a score"},
+  "ablation": {"benchmarks": [], "methods": ["skilllift", "direct_oracle"], "final_repeats": 3, "matched_token_cap": false,
+    "note": "Native SkillsBench/WildClaw ablation dropped on 2026-10-26. The Direct Oracle ablation runs inside the SkillLearnBench generalization command as method direct_oracle."},
   "statistics": {"confidence": 0.95, "bootstrap_repeats": 10000, "permutation_repeats": 20000, "random_seed": 20261025, "multiplicity": "Holm", "incomplete_cohorts": "report coverage only; do not calculate CI or p"},
-  "notes": ["3 evolution_runs means fresh optimization processes, not 3 retries.", "The 2 internal SkillLift final trials are training-instance reevaluations, not held-out tests.", "No skill, human-written and frozen LLM-written repeat execution once per run index; they are not re-authored.", "Completed family/run cells resume by frozen content hash. Interrupted training cells restart in a new attempt.", "Two days is a runtime target, not a measured guarantee. Review pilot costs and timing before the full run."]
+  "notes": ["1 evolution_run by author decision (2026-10-26, time); this protocol does not estimate run-to-run variability. An evolution run is a fresh optimization process, not a retry.", "The 2 internal SkillLift final trials are training-instance reevaluations, not held-out tests.", "No skill, human-written and frozen LLM-written repeat execution once per run index; they are not re-authored.", "Completed family/run cells resume by frozen content hash. Interrupted training cells restart in a new attempt.", "Two days is a runtime target, not a measured guarantee. Review pilot costs and timing before the full run."]
 }
