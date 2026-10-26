@@ -86,14 +86,11 @@ def public_conversation(root):
     return []
 
 
-def verifier_diagnostics(root):
-    """Expose actual criterion outcomes, not assertion source/expected answers."""
-    path = Path(root) / "verifier/ctrf.json"
-    if not path.is_file():
-        return []
-    data = read_json(path)
-    return [{"criterion": str(row.get("name", "")), "status": row.get("status")}
-            for row in data.get("results", {}).get("tests", []) if isinstance(row, dict)]
+def public_execution_feedback(feedback):
+    """Only scalar reward and solver observations may reach optimizers, including on replay."""
+    return {key: feedback[key] for key in (
+        "reward", "solver_status", "solver_conversation", "solver_last_message", "trace_missing"
+    ) if key in feedback}
 
 
 def checked_native_result(evaluation):
@@ -181,7 +178,8 @@ class TrainingOracle:
             hit, value = self.journal.lookup(key)
             if hit:
                 self.replayed += 1
-                self.last_feedback, self.last_conversation = value["feedback"], value["conversation"]
+                self.last_feedback = public_execution_feedback(value["feedback"])
+                self.last_conversation = value["conversation"]
                 result = CandidateEvaluation.from_dict(value["evaluation"])
                 self.valid_rewards.append((phase, float(result.reward)))
                 append_event(self.ledger, {"kind": "oracle_replayed_from_journal", "phase": phase, "skill_hash": portfolio.tree_hash})
@@ -219,19 +217,17 @@ class TrainingOracle:
             result = evaluate(self.instance, portfolio.root, self.model,
                               {**self.protocol["solver"], "retry": self.policy, "vision": self.protocol.get("vision", {})}, folder, self.ledger, self.root)
             self.last_conversation = public_conversation(folder)
-            self.last_feedback = result.get("public_feedback", {"status": result["status"], "error_type": result.get("error_type")})
+            self.last_feedback = public_execution_feedback(result.get("public_feedback", {}))
             self.last_feedback["solver_conversation"] = json.dumps(self.last_conversation, ensure_ascii=False)[-60000:]
-            self.last_feedback["oracle_criterion_outcomes"] = verifier_diagnostics(folder)
             if result["status"] != "OK":
                 return CandidateEvaluation.infrastructure_failure(result.get("error", "Oracle failed"))
             return CandidateEvaluation.valid(result["reward"], result_hash=digest(result), artifact_ref=str(folder / "result.json"), usage_ref=str(self.ledger))
         result = checked_native_result(self.native.evaluate(task_id, portfolio, trial))
         trial_root = execution_root(result.artifact_ref) if result.artifact_ref else self.root / "unavailable-public-trace"
         self.last_conversation = public_conversation(trial_root)
-        self.last_feedback = {"reward": result.reward, "infrastructure_error": result.infrastructure_error,
+        self.last_feedback = {"reward": result.reward,
                               "solver_conversation": json.dumps(self.last_conversation, ensure_ascii=False)[-60000:],
-                              "trace_missing": not bool(self.last_conversation), "trace_root": str(trial_root)}
-        self.last_feedback["oracle_criterion_outcomes"] = verifier_diagnostics(trial_root)
+                              "trace_missing": not bool(self.last_conversation)}
         append_event(self.ledger, {"kind": "native_oracle_rollout", "phase": "training",
                                   "trial": trial.to_dict() if hasattr(trial, "to_dict") else vars(trial),
                                   "result": result.to_dict(), "feedback_source": "solver artifacts only"})

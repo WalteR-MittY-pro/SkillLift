@@ -149,6 +149,37 @@ def test_training_oracle_retries_transient_failures_and_replays_after_restart(tm
     assert "trace 3" in restarted.last_feedback["solver_conversation"]
 
 
+def test_training_feedback_excludes_official_checks_in_live_execution_and_legacy_replay(tmp_path):
+    from skilllift.coordinator import TrialSpec
+
+    class NativeWithPrivateChecks(FakeNative):
+        def evaluate(self, *args):
+            result = super().evaluate(*args)
+            write_json(self.root / f"trial-{self.live}" / "verifier/ctrf.json", {
+                "results": {"tests": [{"name": "SECRET_EXPECTED_12345", "status": "failed"}]}})
+            return result
+
+    seed = _seed(tmp_path)
+    journal_path = tmp_path / "journal.jsonl"
+    oracle = _oracle(tmp_path, NativeWithPrivateChecks(tmp_path / "native", [0.4]), resilience.Journal(journal_path), seed)
+    portfolio = oracle.seed_portfolio("task")
+    trial = TrialSpec("anchor-x", "anchor", 0)
+    assert oracle.evaluate("task", portfolio, trial).reward == 0.4
+    assert "trace 1" in oracle.last_feedback["solver_conversation"]
+    assert "SECRET_EXPECTED" not in journal_path.read_text()
+    assert "oracle_criterion_outcomes" not in oracle.last_feedback
+    # Simulate a journal written before the feedback policy changed.
+    entry = json.loads(journal_path.read_text())
+    entry["value"]["feedback"].update(oracle_criterion_outcomes=[{"criterion": "SECRET_EXPECTED_12345", "status": "failed"}],
+                                      expected_answer="PRIVATE_ANSWER")
+    journal_path.write_text(json.dumps(entry) + "\n")
+    restarted = _oracle(tmp_path, FakeNative(tmp_path / "native2", []), resilience.Journal(journal_path), seed)
+    assert restarted.evaluate("task", portfolio, trial).reward == 0.4
+    assert restarted.native.live == 0
+    assert restarted.last_feedback == oracle.last_feedback
+    assert "SECRET_EXPECTED" in journal_path.read_text()  # Original audit evidence is preserved.
+
+
 def test_direct_oracle_resumes_after_crash_without_repeating_oracle_executions(tmp_path, monkeypatch):
     import difflib
     from experiments.revision2026 import optimization as module

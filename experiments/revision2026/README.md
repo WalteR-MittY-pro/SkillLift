@@ -97,12 +97,12 @@ $PY -m experiments.revision2026 report --run-dir runs/revision2026/ablation
 
 1. 从当前 champion 生成 K 个候选（`max_candidates_per_round`，默认 3），**每个候选只做 1 次 bounded edit**。K 个候选全部生成完才开始执行；后生成的候选能看到同轮已生成的补丁，用于避免重复，但看不到它们的执行结果。
 2. 每个有效候选真实执行 1 次 oracle。
-3. 选分数最高者；分数更高则接受。分数相同时，若通过的 verifier 测试项比例更高也接受（替代 SkillLift 的 verifier tie-break，信息仍只来自 oracle）。
+3. 选分数最高者；只有总分更高才接受。分数相同则保留当前 champion，不读取或使用官方检查项通过比例。
 4. 停止规则与 SkillLift coordinator 相同：anchor_terminal、terminal_candidate、连续 2 轮无提升、轮数用完、全部候选无效。
 
 因此每个 cell 最多 `1 + max_rounds × K` = 10 次 oracle（不含基础设施重试）。基础设施失败与 SkillLift 一样在同一候选上重试，最多 3 次，失败从不记为 0 分。
 
-**生成器收到的反馈**：当前 champion 的分数、求解状态、执行轨迹（超长时从最早部分截断，总量受 `max_feedback_chars` 限制）、最后回复、逐项测试通过/失败；上一轮已执行候选的分数、逐项结果、最后回复片段和补丁片段。不提供测试源码、断言细节、参考答案、模型 thought 或任何测试实例信息。这比 SkillLift 生成器多了逐项测试结果，论文中需注明。
+**生成器收到的反馈**：当前 champion 的总分、求解状态、执行轨迹（超长时从最早部分截断，总量受 `max_feedback_chars` 限制）和最后回复；上一轮已执行候选的总分、最后回复片段和补丁片段。官方检查项名称、通过/失败状态、测试源码、断言细节及参考答案不作为反馈。反馈采用允许字段列表，旧 journal 中的检查项字段也不会重新传入优化器。官方验证器仍正常计算总分并保留原始日志。执行轨迹仍是 Direct Oracle 比当前 SkillLift 提示链更丰富的信息，不能描述为仅删除 rubricator 且输入完全相同。
 
 **逐轮曲线**：每个 cell 的 `work/curve.json` 记录每轮 champion 分数、累计 oracle 次数、累计生成器调用和累计 token，用于审稿人 4 要求的性能–成本对比。
 

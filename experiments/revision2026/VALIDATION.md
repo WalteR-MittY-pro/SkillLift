@@ -24,7 +24,7 @@
 
 ## Direct Oracle 方案 A 与范围调整（2026-10-26）
 
-- `run_direct_oracle` 改为与 SkillLift 相同的 oracle 结构：每轮 K 个候选、每个 1 次修改、1 次 oracle；先生成全部候选再执行；同样的接受、基础设施重试和停止规则；分数相同时用 oracle 逐项通过比例做 tie-break；记录逐轮曲线。
+- `run_direct_oracle` 改为与 SkillLift 相同的 oracle 结构：每轮 K 个候选、每个 1 次修改、1 次 oracle；先生成全部候选再执行；同样的接受、基础设施重试和停止规则；当时分数相同时用 oracle 逐项通过比例做 tie-break（已被下文“移除官方检查项反馈”变更取消）；记录逐轮曲线。
 - protocol：`evolution_runs` 1；SkillLearnBench 方法为 no_skill / llm_written / skillopt / skilllift / direct_oracle；原生 SkillsBench/WildClaw `ablation` 禁用（`run_all.sh` 不再调用）。
 - 新增/更新测试：结构与调用顺序、10 次上限、tie-break、同候选重试、anchor 直接终止、反馈截断、`ablation` 命令禁用、计划规模。本机 Python 3.12 下 `tests/revision2026` 共 34 项通过。仍未运行 Docker、模型或真实任务。
 
@@ -54,3 +54,9 @@
 一条 supplementary 命令同时管理两个模型，每个模型把泛化/消融交错排队，共享 4/8 并发上限；文件锁还限制不同启动进程的总并发及同一逻辑任务的重复执行。SkillOpt LLM 完成记录加入 journal，使用稳定执行编号，重放不重复计费 token。中断时尚未完成的 solver 执行允许重新开始。
 
 新增实验测试 **81 项通过**；加上相关原生适配器回归 **131 项通过**。包含实际启动多个无模型子进程验证共享槽位上限、两个模型并行调度、404 第四次成功/耗尽不叠乘、失败后继续其他任务与就绪测试、恢复只补失败任务且旧日志仍在、SkillOpt 回复重放、冻结中断恢复，以及取消后不再启动新任务。没有运行 Docker 或真实模型实验。最新操作说明见 [RUN_GUIDE.md](RUN_GUIDE.md)。
+
+## 移除官方检查项反馈（2026-10-26）
+
+按作者要求，官方检查项名称和通过/失败状态不再提供给优化器。训练适配器不再提取 CTRF 检查项，旧 journal 重放及 Direct Oracle 生成器入口均使用反馈字段允许列表。删除基于检查项通过比例的同分择优逻辑，候选总分严格提高才替换当前技能。官方评分和原始审计日志保留。
+
+`tests/revision2026` **83 项通过**，新增验证包含：实际评分产物含有私有检查项时不进入训练反馈；旧 journal 中的检查项和额外答案字段被过滤、原始日志保留；所有轮次生成器提示不含检查项；同分但更多检查项通过的候选不被接受；严格分数提升仍可跑满 10 次执行预算。未调用模型或 Docker。

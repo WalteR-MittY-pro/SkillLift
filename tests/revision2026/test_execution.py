@@ -129,8 +129,9 @@ def _direct_oracle_harness(tmp_path, monkeypatch, outcomes, *, max_rounds=3, wid
             if outcome is None:
                 return CandidateEvaluation.infrastructure_failure("synthetic 429")
             reward, passed, total = outcome
-            rows = [{"criterion": f"c{i}", "status": "passed" if i < passed else "failed"} for i in range(total)]
-            self.last_feedback = {"reward": reward, "execution_diagnostic": f"trace-{len(timeline)}", "oracle_criterion_outcomes": rows}
+            rows = [{"criterion": f"HIDDEN_EXPECTED_VALUE_{i}", "status": "passed" if i < passed else "failed"} for i in range(total)]
+            self.last_feedback = {"reward": reward, "solver_conversation": f"trace-{len(timeline)}",
+                                  "oracle_criterion_outcomes": rows, "expected_answer": "PRIVATE_ANSWER"}
             return CandidateEvaluation.valid(reward, result_hash=f"r{len(timeline)}")
 
     class Generator:
@@ -167,18 +168,30 @@ def test_direct_oracle_matches_skilllift_oracle_structure_without_rubric(tmp_pat
     assert curve[-1]["oracle_rollouts_cumulative"] == 4 and curve[-1]["accept_reason"] == "oracle_improved"
 
 
-def test_direct_oracle_budget_is_bounded_and_uses_criterion_tiebreak(tmp_path, monkeypatch):
-    # Equal reward but more criteria passed is accepted (oracle analogue of SkillLift's verifier tie-break);
-    # two later rounds without improvement stop the cell at 1 + 3 x 3 oracle rollouts.
+def test_direct_oracle_ignores_hidden_criteria_in_prompts_and_equal_reward_selection(tmp_path, monkeypatch):
+    # Legacy feedback can contain private criteria. It must neither enter any prompt
+    # nor cause an equal-reward candidate to replace the champion.
     outcomes = [(0, 1, 4)] + [(0, 2, 4), (0, 1, 4), (0, 0, 4)] + [(0, 1, 4)] * 6
     winner, details, timeline, curve = _direct_oracle_harness(tmp_path, monkeypatch, outcomes)
-    assert details["stop_reason"] == "two_no_improvement_rounds" and details["rounds"] == 3
-    assert details["oracle_rollouts"] == 10 == sum(event[0] == "oracle" for event in timeline)
-    assert curve[1]["accept_reason"] == "criterion_tiebreak" and curve[1]["champion_criterion_pass_fraction"] == 0.5
-    assert "Revision direct-r0-c0" in (winner / "guide/SKILL.md").read_text()
+    assert details["stop_reason"] == "two_no_improvement_rounds" and details["rounds"] == 2
+    assert details["oracle_rollouts"] == 7 == sum(event[0] == "oracle" for event in timeline)
+    assert all(point["accept_reason"] is None for point in curve)
+    assert "Revision" not in (winner / "guide/SKILL.md").read_text()
+    prompts = "\n".join(event[2] for event in timeline if event[0] == "generate")
+    assert "trace-1" in prompts and '"reward": 0' in prompts
+    assert all(secret not in prompts + json.dumps(curve) for secret in (
+        "oracle_criterion_outcomes", "HIDDEN_EXPECTED_VALUE", "PRIVATE_ANSWER", "criterion_pass_fraction"))
     # Round 1 feedback includes round 0's executed siblings, not only the champion.
     round1 = [event for event in timeline if event[0] == "generate" and event[1].startswith("direct-r1")]
     assert all("previous_round_candidates" in event[2] and "direct-r0-c2" in event[2] for event in round1)
+
+
+def test_direct_oracle_three_round_budget_with_strict_reward_improvements(tmp_path, monkeypatch):
+    outcomes = [(0, 0, 4)] + [(score, 0, 4) for score in (0.1, 0.2, 0.1, 0.3, 0.2, 0.1, 0.4, 0.3, 0.2)]
+    winner, details, timeline, curve = _direct_oracle_harness(tmp_path, monkeypatch, outcomes)
+    assert details["stop_reason"] == "round_budget_exhausted"
+    assert details["oracle_rollouts"] == 10 == sum(event[0] == "oracle" for event in timeline)
+    assert curve[-1]["champion_reward"] == 0.4
 
 
 def test_direct_oracle_retries_infrastructure_failures_on_the_same_candidate(tmp_path, monkeypatch):

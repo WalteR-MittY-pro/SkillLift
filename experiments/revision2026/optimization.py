@@ -54,21 +54,13 @@ def run_skilllift(oracle, protocol, root, model, ledger, journal=None):
 
 DIRECT_ORACLE_INSTRUCTION = (
     "Improve this reusable skill using actual oracle execution feedback; there is no rubric. "
-    "Edit the CURRENT skill (current_skill_hash). Its own execution trace and per-criterion oracle outcomes are in "
+    "Edit the CURRENT skill (current_skill_hash). Its own execution trace and scalar reward are in "
     "current_skill_feedback. previous_round_candidates are earlier edits that were executed by the oracle; they may "
     "differ from the current skill, so use their outcomes as evidence but respect their hashes. "
     "already_proposed_this_round lists sibling edits generated for this round that have not been executed yet: "
-    "take a clearly different approach from them (address different failed criteria or failure modes). "
+    "take a clearly different approach from them (address different observed execution failure modes). "
     "Do not invent a rubric, do not hard-code answers, and keep the skill reusable for other instances of this task family.\n"
 )
-
-
-def _criterion_pass_fraction(feedback):
-    """Oracle-derived tie-break: share of verifier criteria that passed, or None if unavailable."""
-    rows = [row for row in (feedback or {}).get("oracle_criterion_outcomes") or [] if isinstance(row, dict)]
-    if not rows:
-        return None
-    return sum(str(row.get("status", "")).lower() == "passed" for row in rows) / len(rows)
 
 
 def _ledger_tokens(ledger):
@@ -119,13 +111,14 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
     edits are scored by the rubric, not the oracle). This arm removes the rubricator,
     verifier and rank alignment and, per round, generates the same K candidates from the
     current champion, one bounded edit each, and executes each candidate once. Selection,
-    acceptance, infrastructure retries and stopping mirror the SkillLift coordinator; the
-    rubric/verifier tie-break is replaced by the oracle's own criterion pass fraction.
+    infrastructure retries and stopping mirror the SkillLift coordinator. Acceptance uses
+    strict reward improvement only; hidden evaluator criteria never enter the feedback.
     """
     from skilllift.coordinator import TrialSpec
     from skilllift.portfolio import SearchDirection, apply_portfolio_patch
     from skilllift_eval.runners.bounded_edits_skill_generator import BoundedEditsSkillGenerator
     from skilllift.errors import SkillLiftError
+    from .oracles import public_execution_feedback
     config, rules = protocol["skilllift"], protocol["direct_oracle"]
     if rules["edits_per_candidate"] != 1 or rules["structure"] != "matched_to_skilllift":
         raise ValueError("The agreed Direct Oracle protocol uses one oracle-evaluated edit per candidate")
@@ -148,7 +141,7 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
             counters["oracle_rollouts"] += 1
             result = oracle.evaluate(oracle.family, portfolio, TrialSpec(f"{label}-a{attempt}", phase, attempt, round_index=round_index, candidate_id=label))
             if result.is_valid:
-                feedback = dict(oracle.last_feedback)
+                feedback = public_execution_feedback(oracle.last_feedback)
                 if feedback.get("trace_missing"):
                     raise RuntimeError("Direct Oracle needs this trial's actual execution feedback; refusing a score-only substitute")
                 feedback["evaluated_skill_hash"] = portfolio.tree_hash
@@ -160,8 +153,6 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
     def summary(item):
         feedback = item["feedback"]
         return {"candidate": item["label"], "skill_hash": item["portfolio"].tree_hash, "reward": item["reward"],
-                "criterion_pass_fraction": item["fraction"],
-                "oracle_criterion_outcomes": feedback.get("oracle_criterion_outcomes", []),
                 "solver_last_message": str(feedback.get("solver_last_message", ""))[-2000:],
                 "patch_excerpt": item["patch"][:excerpt]}
 
@@ -169,7 +160,7 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
 
     def record(round_index, accept_reason, stop_reason, extra=None):
         point = {"round_index": round_index, "champion_hash": champion.tree_hash, "champion_reward": champion_reward,
-                 "champion_criterion_pass_fraction": champion_fraction, "accept_reason": accept_reason, "stop_reason": stop_reason,
+                 "accept_reason": accept_reason, "stop_reason": stop_reason,
                  "oracle_rollouts_cumulative": counters["oracle_rollouts"], "generator_calls_cumulative": counters["generator_calls"],
                  "oracle_replayed_cumulative": getattr(oracle, "replayed", 0),
                  **_ledger_tokens(ledger), **(extra or {})}
@@ -182,7 +173,6 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
     champion_reward, champion_feedback = evaluate(champion, "direct-anchor", "anchor")
     if champion_reward is None:
         raise RuntimeError("Direct Oracle anchor did not yield a valid oracle result")
-    champion_fraction = _criterion_pass_fraction(champion_feedback)
     if spec.is_terminal(champion_reward):
         record(-1, None, "anchor_terminal")
         return champion.root, {"stop_reason": "anchor_terminal", "rounds": 0, **counters}
@@ -218,19 +208,16 @@ def run_direct_oracle(oracle, protocol, root, model, ledger, journal=None):
         for item in proposed:
             reward, feedback = evaluate(item["portfolio"], item["label"], "candidate", round_index)
             if reward is not None:
-                evaluated.append({**item, "reward": reward, "feedback": feedback, "fraction": _criterion_pass_fraction(feedback)})
+                evaluated.append({**item, "reward": reward, "feedback": feedback})
         completed = round_index + 1
         accept_reason = None
         if evaluated:
-            winner = max(evaluated, key=lambda item: (item["reward"], -1 if item["fraction"] is None else item["fraction"]))
+            winner = max(evaluated, key=lambda item: item["reward"])
             if spec.improves(winner["reward"], champion_reward):
                 accept_reason = "oracle_improved"
-            elif (winner["reward"] == champion_reward and winner["fraction"] is not None and champion_fraction is not None
-                  and winner["fraction"] > champion_fraction):
-                accept_reason = "criterion_tiebreak"
             if accept_reason:
                 champion, champion_reward = winner["portfolio"], winner["reward"]
-                champion_fraction, champion_feedback = winner["fraction"], winner["feedback"]
+                champion_feedback = winner["feedback"]
         no_improvement = 0 if accept_reason else no_improvement + 1
         previous_round = [summary(item) for item in evaluated]
         stop = None

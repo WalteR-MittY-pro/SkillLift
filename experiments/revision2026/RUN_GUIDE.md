@@ -46,6 +46,10 @@ bash experiments/revision2026/run_all.sh supplementary glm
 bash experiments/revision2026/run_all.sh supplementary deepseek
 ```
 
+## Direct Oracle 反馈边界
+
+Direct Oracle 的生成器只接收总分和求解执行反馈，不接收官方检查项名称、通过/失败状态、期望值或断言细节；同分保留当前技能。旧 journal 的反馈重放也会过滤这些字段，原始评分日志仍保留。如果已用旧反馈完成优化，过滤不能撤销已写入技能的影响：宽松续跑仍跳过已完成任务；正式比较应使用新 `RUN_ROOT` 重跑受影响的实验，旧数据保留作审计。
+
 ## 重试规则
 
 “3 次重试”明确指 **首次尝试 + 最多 3 次重试，共最多 4 次尝试**。404、429 和其他暂时性网络/服务错误采用指数退避；401 等永久配置错误不会盲目重试。
