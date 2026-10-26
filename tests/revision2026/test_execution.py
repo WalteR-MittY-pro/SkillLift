@@ -131,3 +131,17 @@ def test_native_api_failure_is_not_a_valid_zero_but_solver_budget_is(tmp_path):
     assert not checked_native_result(evaluation).is_valid
     write_json(raw, {"error": {"exception_type": "AgentTimeoutError"}})
     assert checked_native_result(evaluation).is_valid
+
+
+@pytest.mark.parametrize("field", ["judge_error", "llm_judge_error", "llm_error"])
+def test_wildclaw_judge_api_failure_is_rejected_even_with_numeric_reward(tmp_path, field):
+    from skilllift.coordinator import CandidateEvaluation
+    from experiments.revision2026.oracles import checked_native_result
+    raw, marker = tmp_path / "score.json", tmp_path / "marker.json"
+    write_json(marker, {"score_path": str(raw)})
+    evaluation = CandidateEvaluation.valid(0, result_hash="raw", artifact_ref=str(marker))
+    write_json(raw, {"scores": {"overall_score": 0, field: "API 400, unsupported image content"}})
+    assert not checked_native_result(evaluation).is_valid
+    # This is a penalized agent outcome in the task, not a judge failure.
+    write_json(raw, {"scores": {"overall_score": .9, "trap_errors": 1}})
+    assert checked_native_result(evaluation).is_valid

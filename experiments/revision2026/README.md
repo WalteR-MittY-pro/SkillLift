@@ -105,6 +105,8 @@ $PY -m experiments.revision2026 repair-run \
 
 ### 5.2 无法恢复的行：完整建立新的 36 项结果
 
+新增的 `skilllift_glm51_verification_logs/` 已另行审计，见[WildClaw GLM-5.1 证据报告](legacy_evidence/wildclaw_glm51_verification.md)。它包含 60 题优化尝试、40 题 final 证据，但存在缺失独立 final、重复取最大值及 judge 失败，不能直接给原总分补 CI/p。可用 `python -m experiments.revision2026.verification_audit --archive <日志目录> --output <审计输出目录>` 复算逐题缺口。新运行额外拒绝包含 `judge_error` / `llm_judge_error` / `llm_error` 的数值分数，避免 scorer 失败被记成真实零分。
+
 ```bash
 $PY -m experiments.revision2026 table2-rebuild \
   --run-dir runs/revision2026/table2-fresh --workers 4

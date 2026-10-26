@@ -102,7 +102,14 @@ def checked_native_result(evaluation):
         return evaluation
     marker = read_json(evaluation.artifact_ref)
     if not marker.get("result_path"):
-        return evaluation  # WildClaw's native wrapper already rejects runner errors.
+        from .verification_audit import scoring_errors
+        if marker.get("score_path"):
+            raw = read_json(marker["score_path"])
+            errors = scoring_errors(raw.get("scores", {}))
+            if errors:
+                from skilllift.coordinator import CandidateEvaluation
+                return CandidateEvaluation.infrastructure_failure("WildClaw judge failed: " + ", ".join(errors))
+        return evaluation
     raw = read_json(marker["result_path"])
     error = raw.get("error")
     if not error:
