@@ -10,7 +10,7 @@ import sys
 import uuid
 from urllib.parse import quote
 
-from .common import HERE, ROOT, digest, endpoint_identity, read_json, require_frozen, tree_hash, utc_now, write_json
+from .common import HERE, ROOT, digest, endpoint_identity, file_lock_or_none, read_json, require_frozen, tree_hash, utc_now, write_json
 from .sources import PINS, Instance, instances, source_path
 
 
@@ -286,7 +286,6 @@ def evaluate_cell(spec):
 
 
 def worker(spec_file):
-    import fcntl
     from .concurrency import model_slot
     spec_file = Path(spec_file)
     spec = read_json(spec_file)
@@ -295,10 +294,8 @@ def worker(spec_file):
                           spec.get("run", 0), spec["family"]))
     location.mkdir(parents=True, exist_ok=True)
     # The lock follows the logical task, even if two commands use different queue directories.
-    with (location / ".execution.lock").open("a") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+    with file_lock_or_none(location / ".execution.lock") as lock:
+        if lock is None:
             write_json(spec_file.with_suffix(".status.json"), {"status": "already_running", "recorded_at": utc_now()})
             return
         if job_done(spec):
@@ -367,6 +364,9 @@ def run_jobs(jobs, root, workers, *, retry_errors=True, cancel_event=None):
             continue
         if job_done(spec):
             skipped += 1
+            write_json(path.with_suffix(".status.json"), {
+                "status": "complete", "reused": True, "finished_at": utc_now(),
+            })
             continue
         status = path.with_suffix(".status.json")
         if status.exists() and read_json(status).get("status") == "error" and not retry_errors:

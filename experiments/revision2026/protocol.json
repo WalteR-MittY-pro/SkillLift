@@ -4,7 +4,7 @@
   "evolution_runs": 1,
   "test_repeats": 1,
   "workers": 4,
-  "solver": {"max_steps": 100, "timeout_seconds": 1800, "command_timeout_seconds": 120, "max_output_tokens": 16384, "temperature": 0.0},
+  "solver": {"max_steps": 100, "timeout_seconds": 1800, "api_timeout_seconds": 900, "command_timeout_seconds": 120, "max_output_tokens": 16384, "temperature": 0.0},
   "vision": {"enabled_for": ["glm"], "model": "glm-5.3-flash", "max_output_tokens": 16384,
     "scope": "shared image-to-text tool for all GLM-5.1 methods; receives only images and a fixed observation prompt; historical 75.1 is reference-only"},
   "skilllearnbench": {

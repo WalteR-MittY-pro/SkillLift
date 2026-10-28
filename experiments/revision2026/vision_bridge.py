@@ -20,10 +20,11 @@ VISION_PROMPT = (
 
 
 class ImageReader:
-    def __init__(self, endpoint, ledger, *, attempts=4, max_tokens=16384, client=None, retry_fn=None):
+    def __init__(self, endpoint, ledger, *, attempts=4, max_tokens=16384, client=None, retry_fn=None, before_request=None):
         self.endpoint, self.ledger = endpoint, Path(ledger)
         self.attempts, self.max_tokens = attempts, max_tokens
         self.client, self.cache = client, {}
+        self.before_request = before_request
         if retry_fn is None:
             from .http_retry import retry_call
             retry_fn = retry_call
@@ -46,6 +47,8 @@ class ImageReader:
             event = {"kind": "vision_usage", "model": self.endpoint["MODEL"], "image_sha256": key}
             try:
                 def request():
+                    if self.before_request is not None:
+                        self.before_request()
                     return self.client.chat.completions.create(model=self.endpoint["MODEL"], max_tokens=self.max_tokens,
                     messages=[{"role": "user", "content": [{"type": "text", "text": VISION_PROMPT},
                                {"type": "image_url", "image_url": {"url": url}}]}])

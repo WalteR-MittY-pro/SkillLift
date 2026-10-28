@@ -24,6 +24,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-root", type=Path, default=ROOT / "runs" / "skilllift_wildclaw_tasks")
     parser.add_argument("--model", required=True, help="Key under model_endpoints in the shared YAML config.")
     parser.add_argument("--category", type=int, choices=ALL_CATEGORIES, nargs="+", default=ALL_CATEGORIES)
+    parser.add_argument(
+        "--task",
+        nargs="+",
+        default=(),
+        help="Restrict the batch to these task ids (must belong to the selected categories).",
+    )
     parser.add_argument("--resume", action="store_true", help="Accepted for clarity; resume is always enabled.")
     return parser.parse_args(argv)
 
@@ -39,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             config_path=args.config,
             model=args.model,
             categories=tuple(args.category),
+            task_ids=tuple(args.task),
         )
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))

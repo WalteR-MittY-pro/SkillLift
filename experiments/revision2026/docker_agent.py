@@ -18,7 +18,7 @@ import time
 import tomllib
 import uuid
 
-from .common import append_event, digest, endpoint, tree_hash, utc_now, write_json
+from .common import append_event, digest, endpoint, file_lock, tree_hash, utc_now, write_json
 from .sources import PINS, source_path
 
 TOOLS = [{"type": "function", "function": {"name": "shell", "description": "Run a shell command inside the task's Linux container. Read and write task files with this tool.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
@@ -37,14 +37,21 @@ def official_helpers():
     return module
 
 
+def task_image_name(instance):
+    return "skilllift-slb-" + digest({"source": PINS["skilllearnbench"][1], "task": instance.task_id})[:20]
+
+
 def base_image(instance, run_root):
-    import fcntl
-    name = "skilllift-slb-" + digest({"source": PINS["skilllearnbench"][1], "task": instance.task_id})[:20]
+    name = task_image_name(instance)
     locks = Path(run_root) / "image-locks"
     locks.mkdir(parents=True, exist_ok=True)
-    with (locks / (name + ".lock")).open("w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if command(["docker", "image", "inspect", name], check=False).returncode == 0:
+    with file_lock(locks / (name + ".lock")):
+        inspected = command(["docker", "image", "inspect", name], check=False)
+        if inspected.returncode == 0:
+            append_event(locks / (name + ".events.jsonl"), {
+                "kind": "task_image", "image": name,
+                "image_id": json.loads(inspected.stdout)[0]["Id"], "reused": True,
+            })
             return name
         helpers = official_helpers()
         context = helpers._prepare_build_env(instance.path / "environment", "no_skill", None)
@@ -56,6 +63,11 @@ def base_image(instance, run_root):
             (locks / (name + ".build.log")).write_text(built.stdout + built.stderr)
             if built.returncode:
                 raise RuntimeError(f"Image build failed; see {locks / (name + '.build.log')}")
+            inspected = command(["docker", "image", "inspect", name])
+            append_event(locks / (name + ".events.jsonl"), {
+                "kind": "task_image", "image": name,
+                "image_id": json.loads(inspected.stdout)[0]["Id"], "reused": False,
+            })
         finally:
             shutil.rmtree(context.parent)
     return name
@@ -86,7 +98,8 @@ def inject_skills(container, source, dockerfile):
             copies.append((local, destination))
     for local, destination in copies:
         command(["docker", "exec", container, "mkdir", "-p", destination])
-        command(["docker", "cp", str(local) + ("/." if local.is_dir() else ""), f"{container}:{destination}"])
+        # "<dir><sep>." copies the directory contents; use the host separator (\. on Windows).
+        command(["docker", "cp", str(local) + (os.sep + "." if local.is_dir() else ""), f"{container}:{destination}"])
 
 
 def tool_result(container, name, arguments, timeout):
@@ -115,8 +128,11 @@ def tool_result(container, name, arguments, timeout):
 
 def run_solver(container, instruction, skill_dir, model, settings, output, ledger):
     from openai import OpenAI
+    from .concurrency import wait_for_api_request
     ep = endpoint(model)
-    client = OpenAI(api_key=ep["API_KEY"], base_url=ep["BASE_URL"], timeout=300, max_retries=0)
+    api_timeout = float(settings.get("api_timeout_seconds", 900))
+    extra_body = settings.get("extra_body_by_model", {}).get(model, {})
+    client = OpenAI(api_key=ep["API_KEY"], base_url=ep["BASE_URL"], timeout=api_timeout, max_retries=0)
     catalog = []
     if skill_dir:
         import yaml
@@ -131,7 +147,8 @@ def run_solver(container, instruction, skill_dir, model, settings, output, ledge
     if model in settings.get("vision", {}).get("enabled_for", []):
         from .vision_bridge import ImageReader
         reader = ImageReader(endpoint("glm_vision"), ledger, attempts=policy["api_max_attempts"],
-                             max_tokens=settings["vision"]["max_output_tokens"])
+                             max_tokens=settings["vision"]["max_output_tokens"],
+                             before_request=lambda: wait_for_api_request("glm_vision"))
     began = time.monotonic()
     excluded = 0.0  # time lost to transient API failures and backoff never counts against the solver budget
     status = "step_limit"
@@ -139,26 +156,52 @@ def run_solver(container, instruction, skill_dir, model, settings, output, ledge
         if time.monotonic() - began - excluded > settings["timeout_seconds"]:
             status = "solver_timeout"
             break
-        call_started, last_attempt = time.monotonic(), {}
+        call_started, last_attempt = time.monotonic(), {"count": 0}
 
         def request():
+            wait_for_api_request(model)
             last_attempt["start"] = time.monotonic()
-            return client.chat.completions.create(model=ep["MODEL"], messages=messages, tools=TOOLS,
-                                                  temperature=settings["temperature"], max_tokens=settings["max_output_tokens"])
+            last_attempt["count"] += 1
+            details = {"step": step, "attempt": last_attempt["count"], "model": ep["MODEL"],
+                       "stream": False, "api_timeout_seconds": api_timeout, "message_count": len(messages),
+                       "max_output_tokens": settings["max_output_tokens"]}
+            details["extra_body"] = extra_body
+            append_event(ledger, {"kind": "solver_request_started", **details})
+            try:
+                response = client.chat.completions.create(model=ep["MODEL"], messages=messages, tools=TOOLS, stream=False,
+                                                         temperature=settings["temperature"], max_tokens=settings["max_output_tokens"],
+                                                         **({"extra_body": extra_body} if extra_body else {}))
+            except Exception as exc:
+                causes, cause = [], exc
+                while cause is not None and len(causes) < 8:
+                    causes.append(type(cause).__name__)
+                    cause = cause.__cause__
+                append_event(ledger, {"kind": "solver_request_failed", **details,
+                                     "elapsed_seconds": round(time.monotonic() - last_attempt["start"], 3),
+                                     "exception_chain": causes, "http_status": getattr(exc, "status_code", None)})
+                raise
+            append_event(ledger, {"kind": "solver_request_completed", **details,
+                                 "elapsed_seconds": round(time.monotonic() - last_attempt["start"], 3),
+                                 "request_id": getattr(response, "_request_id", None)})
+            return response
 
         reply = retry_call(request, attempts=policy["api_max_attempts"], base=policy["api_base_seconds"], cap=policy["api_max_seconds"],
                            describe="solver", log=lambda event: append_event(ledger, {**event, "step": step}))
         excluded += last_attempt["start"] - call_started
         usage = reply.usage.model_dump() if reply.usage else None
+        finish_reason = getattr(reply.choices[0], "finish_reason", None)
         append_event(ledger, {"kind": "solver_usage", "step": step, "model": ep["MODEL"], "usage": usage,
-                              "usage_available": usage is not None, "response_model": reply.model})
+                              "usage_available": usage is not None, "response_model": reply.model, "finish_reason": finish_reason})
         msg = reply.choices[0].message
         value = msg.model_dump(exclude_none=True)
         # Preserve reasoning_content when returned: thinking tool-call APIs require it.
         messages.append(value)
         write_json(output / "conversation.json", messages)
+        if finish_reason == "length":
+            status = "output_token_limit"
+            break  # Never execute a partially generated tool command.
         if not msg.tool_calls:
-            status = "completed"
+            status = "completed" if msg.content else "empty_response"
             break
         images = []
         for call in msg.tool_calls:
@@ -195,6 +238,7 @@ def evaluate(instance, skill_dir, model, settings, output, ledger, run_root):
         config_path = instance.path / "task.toml"
         cfg = tomllib.loads(config_path.read_text()) if config_path.exists() else {}
         image = base_image(instance, run_root)
+        result["task_image"] = image
         command(solver_command(solver, image, cfg.get("environment", {}).get("required_env", [])))
         if skill_dir:
             inject_skills(solver, skill_dir, instance.path / "environment/Dockerfile")

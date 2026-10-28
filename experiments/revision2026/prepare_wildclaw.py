@@ -16,8 +16,8 @@ IMAGE_TAG = "wildclawbench-ubuntu:v1.3"
 
 
 def prepare():
-    if platform.system() != "Linux":
-        raise ValueError("Run image/data preparation inside the target WSL/Linux environment")
+    if platform.system() not in {"Linux", "Windows"}:
+        raise ValueError("Run image/data preparation on the execution machine (Linux/WSL or Windows Git Bash)")
     from huggingface_hub import hf_hub_download, snapshot_download
     root = verify_source("wildclawbench")
     subprocess.run(["docker", "info"], stdout=subprocess.DEVNULL, check=True)
@@ -30,7 +30,11 @@ def prepare():
     missing = [name for name in ["ffmpeg", "yt-dlp", "modelscope"] if shutil.which(name) is None]
     if missing:
         raise ValueError("Workspace downloaded; official media preparation still needs: " + ", ".join(missing) + ". See README.md; rerun this command after installing them.")
-    subprocess.run(["bash", "script/prepare.sh"], cwd=root, check=True)
+    # Resolve bash from PATH: on Windows a bare "bash" may start System32 bash.exe (the WSL launcher) instead of Git Bash.
+    bash = shutil.which("bash")
+    if bash is None:
+        raise ValueError("bash is required for the official prepare.sh; run from Git Bash on Windows")
+    subprocess.run([bash, "script/prepare.sh"], cwd=root, check=True)
     tracked = []
     for pattern in ["**/first_half.mp4", "**/video.mp4", "**/recording.mp4", "**/sam3.pt"]:
         for path in sorted((root / "workspace").glob(pattern)):

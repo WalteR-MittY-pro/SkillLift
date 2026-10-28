@@ -24,12 +24,12 @@ def interleave_training(experiments):
     return jobs
 
 
-def run_supplementary(root, protocol, *, glm_workers=4, deepseek_workers=8, plan_only=False):
+def run_supplementary(root, protocol, *, glm_workers=4, deepseek_workers=4, plan_only=False):
     root = Path(root).resolve()
     workers = {"glm": glm_workers, "deepseek": deepseek_workers}
     for model in protocol["models"]:
         if model not in MODEL_LIMITS or not 1 <= workers[model] <= MODEL_LIMITS[model]:
-            raise ValueError("GLM workers must be 1–4; DeepSeek workers must be 1–8")
+            raise ValueError("GLM workers must be 1–4; DeepSeek workers must be 1–4")
 
     def plan(model, name, settings):
         folder = root / model / name

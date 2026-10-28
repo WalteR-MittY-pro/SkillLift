@@ -6,6 +6,7 @@ import shutil
 from types import SimpleNamespace
 
 from .common import append_event, endpoint, write_json
+from .concurrency import wait_for_api_request
 
 
 def clients(model, ledger, roles=("rubricator", "skill_generator", "verifier"), *, protocol=None, journal=None):
@@ -16,7 +17,10 @@ def clients(model, ledger, roles=("rubricator", "skill_generator", "verifier"), 
     policy = policy_from(protocol)
     log = lambda event: append_event(ledger, event)
     failure_state = {}
-    return {role: ResilientLLM(LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=True, max_retries=0,
+    timeout = (protocol or {}).get("solver", {}).get("api_timeout_seconds", 900)
+    extra_body = (protocol or {}).get("solver", {}).get("extra_body_by_model", {}).get(model, {})
+    return {role: ResilientLLM(LLMClient(ep["BASE_URL"], ep["API_KEY"], ep["MODEL"], role=role, use_stream=False, timeout=timeout, max_retries=0,
+                                         extra_body=extra_body, before_request=lambda: wait_for_api_request(model),
                                          usage_callback=lambda event: append_event(ledger, {"kind": "framework_usage", **event})),
                                policy, journal, log, failure_state)
             for role in roles}
@@ -248,13 +252,39 @@ def skillopt_config(protocol, root, seed_file, ep, run_index):
                optimizer_backend="openai_compatible", target_backend="openai_compatible",
                optimizer_model=ep["MODEL"], target_model=ep["MODEL"],
                optimizer_openai_compatible_base_url=ep["BASE_URL"], target_openai_compatible_base_url=ep["BASE_URL"],
+               optimizer_openai_compatible_timeout_seconds=protocol["solver"].get("api_timeout_seconds", 900),
+               target_openai_compatible_timeout_seconds=protocol["solver"].get("api_timeout_seconds", 900),
                slow_update_gate_with_selection=True, use_slow_update=False, use_meta_skill=False)
     # Official trainer does not redact role-specific API-key fields. Never put
     # secrets in this dictionary: configure the backend in process memory instead.
     return cfg
 
 
-def _harden_skillopt(protocol, ledger, journal=None):
+def skillopt_trajectory(messages):
+    """Expose OpenAI tool actions in the official SkillOpt trajectory format.
+
+    SkillOpt's formatter reads content or cmd/obs; it does not read tool_calls.
+    Match observations by call ID so parallel calls keep their own outputs.
+    """
+    from .oracles import clean_messages
+    result, calls = [], {}
+    for message in clean_messages(messages):
+        if message["role"] == "tool" and message.get("tool_call_id") in calls:
+            action = calls[message["tool_call_id"]]
+            action["obs"] += message["content"]
+            continue
+        if message["content"]:
+            result.append({"role": message["role"], "content": message["content"]})
+        for call in message.get("tool_calls", []):
+            function = call.get("function", {})
+            action = {"type": "tool_call", "cmd": f"{function.get('name', '')}({function.get('arguments', '')})", "obs": ""}
+            result.append(action)
+            if call.get("id"):
+                calls[call["id"]] = action
+    return result
+
+
+def _harden_skillopt(protocol, ledger, journal=None, *, model=None):
     """Bounded retries and journal replay around the pinned backend's HTTP boundary."""
     from skillopt.model import openai_compatible_backend as backend
     from .resilience import policy_from, retry_call, request_key
@@ -271,6 +301,10 @@ def _harden_skillopt(protocol, ledger, journal=None):
         # returned client rather than only the initial cached instance.
         client = original_client(role).with_options(max_retries=0)
         def create(**kwargs):
+            kwargs["stream"] = False
+            extra_body = protocol["solver"].get("extra_body_by_model", {}).get(model, {})
+            if extra_body:
+                kwargs["extra_body"] = {**kwargs.get("extra_body", {}), **extra_body}
             if failure_state.get("error"):
                 raise failure_state["error"]
             key = request_key("skillopt_llm", role, kwargs)
@@ -280,8 +314,12 @@ def _harden_skillopt(protocol, ledger, journal=None):
                     from openai.types.chat import ChatCompletion
                     append_event(ledger, {"kind": "skillopt_replayed_from_journal", "role": role})
                     return ChatCompletion.model_validate({**saved["response"], "usage": None})
+            def request():
+                wait_for_api_request(model or kwargs.get("model", "other"))
+                return client.chat.completions.create(**kwargs)
+
             try:
-                response = retry_call(lambda: client.chat.completions.create(**kwargs), attempts=policy["api_max_attempts"],
+                response = retry_call(request, attempts=policy["api_max_attempts"],
                                       base=policy["api_base_seconds"], cap=policy["api_max_seconds"], describe=f"skillopt:{role}",
                                       log=lambda event: append_event(ledger, event))
             except Exception as exc:
@@ -290,7 +328,8 @@ def _harden_skillopt(protocol, ledger, journal=None):
                     journal.release(key)
                 raise
             usage = getattr(response, "usage", None)
-            append_event(ledger, {"kind": "skillopt_api_usage", "role": role, "usage": usage.model_dump() if usage else None})
+            append_event(ledger, {"kind": "skillopt_api_usage", "role": role, "usage": usage.model_dump() if usage else None,
+                                  "response_model": getattr(response, "model", None), "extra_body": extra_body, "stream": False})
             if journal is not None:
                 journal.record(key, {"response": response.model_dump()})
             return response
@@ -314,6 +353,7 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
     from skillopt.model import configure_openai_compatible, get_token_summary, reset_token_tracker
     from skilllift.coordinator import TrialSpec
     from skilllift.portfolio import PortfolioRef
+    from .oracles import public_execution_feedback
     seed_files = list(oracle.seed.glob("*/SKILL.md"))
     if len(seed_files) != 1:
         raise ValueError("SkillLearnBench SkillOpt adaptation requires the single frozen GPT-6-SOL skill per family")
@@ -359,13 +399,13 @@ def run_skillopt(oracle, protocol, root, model, ledger, run_index, journal=None)
                 conversation = list(oracle.last_conversation)
                 if not conversation:
                     raise RuntimeError("SkillOpt requires real solver trajectories for official reflection")
-                write_json(folder / "conversation.json", conversation)
+                write_json(folder / "conversation.json", skillopt_trajectory(conversation))
                 rows.append({"id": name, "hard": evaluation.reward, "soft": evaluation.reward, "task_type": oracle.family,
                              "task_description": oracle.public_task(oracle.family).text,
-                             "fail_reason": json.dumps(oracle.last_feedback, ensure_ascii=False), "n_turns": len(conversation)})
+                             "fail_reason": json.dumps(public_execution_feedback(oracle.last_feedback), ensure_ascii=False), "n_turns": len(conversation)})
             return rows
 
-    failure_state = _harden_skillopt(protocol, ledger, journal=journal)
+    failure_state = _harden_skillopt(protocol, ledger, journal=journal, model=model)
     reset_token_tracker()
     try:
         ReflACTTrainer(cfg, Adapter()).train()

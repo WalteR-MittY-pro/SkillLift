@@ -10,8 +10,9 @@ def test_hidden_verifiers_are_absent_from_solver_command():
     assert not any("tests" in x or "API_KEY" in x for x in command)
 
 
-def test_only_stopped_solver_snapshot_is_used_for_scoring():
-    command = scorer_command("scorer", "snapshot:abc", Path("/tasks/x"), Path("/runs/x"))
+def test_only_stopped_solver_snapshot_is_used_for_scoring(tmp_path):
+    task, output = tmp_path / "task", tmp_path / "output"
+    command = scorer_command("scorer", "snapshot:abc", task, output)
     assert "snapshot:abc" in command
-    assert "type=bind,source=/tasks/x/tests,target=/tests,readonly" in command
+    assert f"type=bind,source={task / 'tests'},target=/tests,readonly" in command
     assert command[-1] == "/tests/test.sh"

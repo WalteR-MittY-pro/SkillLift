@@ -15,6 +15,20 @@ def test_extract_message_text() -> None:
     assert _extract_message_text({"choices": [{"message": {"content": " hello "}}]}) == "hello"
 
 
+def test_nonstream_thinking_policy_reaches_wire(monkeypatch):
+    client = LLMClient("https://example.test", "synthetic", "glm", extra_body={"thinking": {"type": "disabled"}})
+    bodies = []
+    def call(url, body, headers, request_id):
+        bodies.append(json.loads(body))
+        return {"choices": [{"message": {"content": "ok"}}]}
+    monkeypatch.setattr(client, "_call_with_retries", call)
+    assert client.call_text("system", "user") == "ok"
+    assert bodies[0]["thinking"] == {"type": "disabled"}
+    assert not bodies[0].get("stream", False)
+    with pytest.raises(ValueError, match="cannot override"):
+        LLMClient("https://example.test", "synthetic", "glm", extra_body={"stream": True})
+
+
 def test_parse_json_response_accepts_fenced_object() -> None:
     assert _parse_json_response("```json\n{\"a\": 1}\n```") == {"a": 1}
 
@@ -545,3 +559,27 @@ def test_resolve_llm_config_expands_base_url_and_model_env(tmp_path, monkeypatch
     assert resolved.base_url == "https://example.test/v1"
     assert resolved.api_key == "token"
     assert resolved.model == "gpt-5.4"
+
+
+def test_before_request_callback_runs_on_each_attempt_without_legacy_sleep(monkeypatch):
+    events = []
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"choices":[{"message":{"content":"ok"}}]}'
+    def urlopen(*args, **kwargs):
+        events.append("http")
+        if events.count("http") == 1:
+            raise http.client.RemoteDisconnected("retry")
+        return Response()
+    monkeypatch.setattr(llm_client.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(llm_client.time, "sleep", lambda seconds: events.append(("retry_sleep", seconds)))
+    monkeypatch.setattr(llm_client, "_sleep_before_framework_llm_call",
+                        lambda *args: pytest.fail("legacy delay must not stack with pacing"))
+    client = LLMClient("https://example.test", "fake", "deepseek-flash", role="skill_generator",
+                       max_retries=1, before_request=lambda: events.append("pace"))
+    assert client.call_text("system", "user") == "ok"
+    assert events == ["pace", "http", ("retry_sleep", 1), "pace", "http"]

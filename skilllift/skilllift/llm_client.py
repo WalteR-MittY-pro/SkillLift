@@ -52,6 +52,8 @@ class LLMClient:
         role: str = "llm",
         use_stream: bool = False,
         usage_callback: Callable[[dict[str, Any]], None] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        before_request: Callable[[], None] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -63,6 +65,10 @@ class LLMClient:
         self.role = role
         self.use_stream = use_stream
         self.usage_callback = usage_callback
+        self.before_request = before_request
+        self.extra_body = dict(extra_body or {})
+        if self.extra_body.keys() & {"model", "messages", "stream", "stream_options"}:
+            raise ValueError("extra_body cannot override model, messages, or streaming")
         self.ssl_context = _ssl_context()
         self.request_count = 0
         self.total_tokens = 0
@@ -109,6 +115,7 @@ class LLMClient:
         self.request_count += 1
         request_id = f"{self.role}-{self.request_count:04d}"
         payload = {
+            **self.extra_body,
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -171,6 +178,8 @@ class LLMClient:
                     "request_id": request_id,
                     "role": self.role,
                     "model": self.model,
+                    "response_model": data.get("model"),
+                    "extra_body": self.extra_body,
                     "usage": usage if isinstance(usage, dict) else {},
                 }
             )
@@ -193,7 +202,10 @@ class LLMClient:
             _log_llm(
                 f"attempt start id={request_id} attempt={attempt_no}/{self.max_retries + 1}"
             )
-            _sleep_before_framework_llm_call(self.role, request_id)
+            if self.before_request is not None:
+                self.before_request()
+            else:
+                _sleep_before_framework_llm_call(self.role, request_id)
             try:
                 with urllib.request.urlopen(
                     request,

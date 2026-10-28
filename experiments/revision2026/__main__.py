@@ -10,21 +10,21 @@ import platform
 import subprocess
 import sys
 
-from .common import endpoint, load_protocol, read_json, verify_seeds, write_json
+from .common import IS_WINDOWS, endpoint, ensure_utf8_mode, load_protocol, read_json, verify_seeds, write_json
 from .sources import PINS, prepare_sources, verify_source
 
 
-def preflight(models, benchmarks, writer=False, protocol=None):
+def preflight(models, benchmarks, writer=False, protocol=None, require_cached_images=False):
     protocol = protocol or load_protocol()
-    if platform.system() != "Linux":
-        raise ValueError("Run inside WSL/Linux, not Windows Python or macOS")
+    if platform.system() not in {"Linux", "Windows"}:
+        raise ValueError("Run on Linux/WSL or Windows (Git Bash) with Docker Desktop; macOS is not supported")
     if sys.version_info < (3, 12):
         raise ValueError("Python 3.12+ is required")
     try:
         subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=20)
         subprocess.run(["docker", "compose", "version"], capture_output=True, check=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as exc:
-        raise ValueError("WSL cannot reach Docker. Start Windows Docker Desktop and enable this distro under Resources > WSL Integration.") from exc
+        raise ValueError("Docker is unreachable. Start Docker Desktop" + ("." if IS_WINDOWS else " and enable this distro under Resources > WSL Integration.")) from exc
     for model in models + (["writer"] if writer else []):
         resolved = endpoint(model)
         historical = {"gpt_skillsbench": "gpt-5.4-mini", "gpt_wildclaw": "gpt-5.4", "deepseek_pro": "deepseek-v4-pro"}
@@ -54,8 +54,30 @@ def preflight(models, benchmarks, writer=False, protocol=None):
         missing = sorted(name for name in required if not os.environ.get(name))
         if missing:
             raise ValueError("Full SkillLearnBench task coverage requires: " + ", ".join(missing))
-    if importlib.util.find_spec("skillopt") is None:
+        if require_cached_images:
+            from .docker_agent import task_image_name
+            available = set(subprocess.check_output(
+                ["docker", "image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], text=True, timeout=30
+            ).splitlines())
+            expected = {task_image_name(instance) + ":latest" for instance in instances()}
+            missing_images = sorted(expected - available)
+            if missing_images:
+                raise ValueError(f"Connected Docker daemon is missing {len(missing_images)}/{len(expected)} cached task images. "
+                                 "Check DOCKER_HOST/DOCKER_CONTEXT (WSL native Docker and Docker Desktop have separate image stores). "
+                                 f"No jobs started. Examples: {', '.join(missing_images[:3])}")
+            print(f"Cached SkillLearnBench task images: {len(expected)}/{len(expected)}", flush=True)
+    skillopt_spec = importlib.util.find_spec("skillopt")
+    if skillopt_spec is None:
         raise ValueError("Install the pinned SkillOpt package using setup.sh")
+    from .sources import source_path
+    if not skillopt_spec.origin or not Path(skillopt_spec.origin).resolve().is_relative_to(source_path("skillopt").resolve()):
+        raise ValueError("Install SkillOpt from .cache/revision2026/skillopt so the imported trainer matches the pinned source")
+    try:
+        from skillopt.engine.trainer import ReflACTTrainer
+        from skilllift.coordinator import TrialSpec
+        import bounded_edits
+    except ImportError as exc:
+        raise ValueError(f"Experiment runtime import failed: {exc}. Reinstall the local packages and their dependencies.") from exc
     if "skillsbench" in benchmarks:
         from importlib.metadata import version
         if version("benchflow") != "0.6.3":
@@ -69,7 +91,7 @@ def preflight(models, benchmarks, writer=False, protocol=None):
         from .sources import source_path
         if not (source_path("wildclawbench") / "workspace").is_dir():
             raise ValueError("WildClaw workspace data missing; run prepare-wildclaw")
-    print(json.dumps({"status": "configuration_ready", "wsl": "microsoft" in platform.release().lower() or bool(os.getenv("WSL_DISTRO_NAME")),
+    print(json.dumps({"status": "configuration_ready", "platform": platform.system(), "wsl": "microsoft" in platform.release().lower() or bool(os.getenv("WSL_DISTRO_NAME")),
                       "models": {model: endpoint(model)["MODEL"] for model in models},
                       "environment_precedence": "exported variables override .env",
                       "inference_tested": False, "container_tasks_tested": False}, indent=2))
@@ -78,11 +100,16 @@ def preflight(models, benchmarks, writer=False, protocol=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="SkillLift revision experiments for WSL + Docker Desktop")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("prepare", help="Fetch fixed benchmark/SkillOpt source and task data on the execution machine")
+    prepare_parser = sub.add_parser("prepare", help="Fetch fixed benchmark/SkillOpt source and task data on the execution machine")
+    prepare_parser.add_argument("--benchmarks", choices=["skilllearnbench", "skillsbench", "wildclawbench"], nargs="+",
+                                help="Prepare only these benchmarks plus SkillOpt; defaults to all sources")
     sub.add_parser("prepare-wildclaw", help="On WSL: download/load the official OpenClaw image and prepare benchmark media")
     doctor = sub.add_parser("preflight")
     doctor.add_argument("--historical", action="store_true", help="Also require original-model endpoints and GPT-6-SOL writer for Table2 rebuilding")
     doctor.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
+    doctor.add_argument("--require-cached-images", action="store_true", help="Fail before scheduling if task images are absent from this Docker daemon")
+    doctor.add_argument("--benchmarks", choices=["skilllearnbench", "skillsbench", "wildclawbench"], nargs="+",
+                        help="Check only the selected benchmarks; defaults to the supplementary experiment suite")
     budget_parser = sub.add_parser("budget", help="Print the audited SkillOpt oracle-execution budget without running models")
     budget_parser.add_argument("--protocol", type=Path)
     together = sub.add_parser("supplementary", help="Run both new experiments in shared GLM/DeepSeek queues")
@@ -90,7 +117,7 @@ def main(argv=None):
     together.add_argument("--protocol", type=Path)
     together.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
     together.add_argument("--glm-workers", type=int, default=4)
-    together.add_argument("--deepseek-workers", type=int, default=8)
+    together.add_argument("--deepseek-workers", type=int, default=4)
     together.add_argument("--plan-only", action="store_true")
     for name in ["pilot", "generalization", "ablation", "table2-rebuild"]:
         p = sub.add_parser(name)
@@ -103,6 +130,7 @@ def main(argv=None):
         p.add_argument("--retry-errors", action="store_true", help="Kept for compatibility; failed jobs are retried by default")
         p.add_argument("--no-retry-errors", action="store_true", help="Stop if earlier failed jobs exist instead of retrying them")
         p.add_argument("--plan-only", action="store_true")
+        p.add_argument("--require-cached-images", action="store_true", help="Require all cached SkillLearnBench task images before scheduling")
     p = sub.add_parser("worker", help="Internal process worker; normally launched by the batch runner")
     p.add_argument("spec", type=Path)
     p = sub.add_parser("report")
@@ -123,9 +151,9 @@ def main(argv=None):
     p.add_argument("--plan-only", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "prepare":
-        if platform.system() != "Linux":
-            raise ValueError("Prepare source/data on the target WSL/Linux machine")
-        prepare_sources(list(PINS))
+        if platform.system() not in {"Linux", "Windows"}:
+            raise ValueError("Prepare source/data on the execution machine (Linux/WSL or Windows)")
+        prepare_sources(list(dict.fromkeys([*args.benchmarks, "skillopt"])) if args.benchmarks else list(PINS))
         return
     if args.command == "prepare-wildclaw":
         from .prepare_wildclaw import prepare
@@ -156,13 +184,23 @@ def main(argv=None):
         return
     if args.command == "status":
         from collections import Counter
+        from .runner import job_done
         counts = Counter()
-        for path in (args.run_dir / "jobs").glob("*.json"):
+        current_jobs = {}
+        for path in sorted((args.run_dir / "jobs").glob("*.json"), key=lambda p: p.stat().st_mtime_ns):
             if path.name.endswith(".status.json"):
                 continue
             spec = read_json(path)
+            # A changed timeout/protocol produces a new spec filename on resume.
+            # Old attempts remain audit evidence, not additional logical tasks.
+            identity = tuple(spec.get(key) for key in (
+                "kind", "benchmark", "model", "method", "run", "family", "task_id", "phase", "repeat"
+            ))
+            current_jobs[identity] = (path, spec)
+        for path, spec in current_jobs.values():
             status = path.with_suffix(".status.json")
-            state = "blocked" if spec.get("blocked_reason") else read_json(status)["status"] if status.exists() else "pending"
+            state = ("blocked" if spec.get("blocked_reason") else "complete" if job_done(spec)
+                     else read_json(status)["status"] if status.exists() else "pending")
             counts[(spec["kind"], state)] += 1
         print(json.dumps([{"kind": k[0], "recorded_status": k[1], "count": n} for k, n in sorted(counts.items())], indent=2))
         return
@@ -176,8 +214,8 @@ def main(argv=None):
     if getattr(args, "models", None):
         protocol["models"] = list(dict.fromkeys(args.models))
     if args.command == "supplementary":
-        if not 1 <= args.glm_workers <= 4 or not 1 <= args.deepseek_workers <= 8:
-            raise ValueError("GLM workers must be 1–4; DeepSeek workers must be 1–8")
+        if not 1 <= args.glm_workers <= 4 or not 1 <= args.deepseek_workers <= 4:
+            raise ValueError("GLM workers must be 1–4; DeepSeek workers must be 1–4")
         if not args.plan_only:
             preflight(protocol["models"], ["skilllearnbench", "skillsbench"], protocol=protocol)
         from .batch import run_supplementary
@@ -189,8 +227,8 @@ def main(argv=None):
         if args.historical:
             from .legacy import HISTORICAL_MODELS
             models = sorted({m for group in HISTORICAL_MODELS.values() for m in group})
-        benchmarks = ["skilllearnbench", "skillsbench"] + (["wildclawbench"] if args.historical else [])
-        preflight(models, benchmarks, writer=args.historical, protocol=protocol)
+        benchmarks = args.benchmarks or (["skilllearnbench", "skillsbench"] + (["wildclawbench"] if args.historical else []))
+        preflight(models, benchmarks, writer=args.historical, protocol=protocol, require_cached_images=args.require_cached_images)
         return
     from .runner import ablation_jobs, generalization_jobs, prepare_run, run_jobs, seal_evaluation_plan
     if args.command == "pilot":
@@ -218,7 +256,8 @@ def main(argv=None):
     else:
         benchmarks = ["skillsbench", "wildclawbench"]
     if not args.plan_only:
-        preflight(protocol["models"], benchmarks, writer=args.command == "table2-rebuild", protocol=protocol)
+        preflight(protocol["models"], benchmarks, writer=args.command == "table2-rebuild", protocol=protocol,
+                  require_cached_images=getattr(args, "require_cached_images", False))
     protocol, config_hash = prepare_run(args.run_dir, protocol)
     if args.command in {"pilot", "generalization"}:
         jobs = generalization_jobs(args.run_dir, protocol, config_hash, stage=args.stage, pilot=args.command == "pilot")
@@ -251,6 +290,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    ensure_utf8_mode(["-m", "experiments.revision2026", *sys.argv[1:]])
     try:
         main()
     except (ValueError, RuntimeError, FileNotFoundError) as exc:

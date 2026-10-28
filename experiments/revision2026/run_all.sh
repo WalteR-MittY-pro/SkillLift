@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-PY=.venv-revision2026/bin/python
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) PY=.venv-revision2026/Scripts/python.exe; export PYTHONUTF8=1 ;;
+  *) PY=.venv-revision2026/bin/python ;;
+esac
 MODE="${1:-supplementary}"
 MODEL="${2:-}"
 MODEL_ARGS=()
@@ -11,10 +14,10 @@ if [[ -n "$MODEL" ]]; then
 fi
 WORKERS="${WORKERS:-4}"  # Legacy rebuild/repair only; supplementary has two model-specific pools.
 RUN_ROOT="${RUN_ROOT:-runs/revision2026}"
-[[ -x "$PY" ]] || { echo 'Run bash experiments/revision2026/setup.sh inside WSL first.' >&2; exit 2; }
+[[ -x "$PY" ]] || { echo 'Run bash experiments/revision2026/setup.sh first (WSL or Git Bash).' >&2; exit 2; }
 if [[ "$MODE" == supplementary ]]; then
   exec "$PY" -m experiments.revision2026 supplementary --run-dir "$RUN_ROOT" \
-    --glm-workers "${GLM_WORKERS:-4}" --deepseek-workers "${DEEPSEEK_WORKERS:-8}" "${MODEL_ARGS[@]}"
+    --glm-workers "${GLM_WORKERS:-4}" --deepseek-workers "${DEEPSEEK_WORKERS:-4}" "${MODEL_ARGS[@]}"
 fi
 if [[ "$MODE" != supplementary && "$MODE" != rebuild && "$MODE" != repair ]]; then
   echo 'Usage: run_all.sh [supplementary [glm|deepseek]|rebuild|repair]. supplementary runs only the two new experiments.' >&2
@@ -23,7 +26,7 @@ fi
 if [[ "$MODE" == rebuild ]]; then
   "$PY" -m experiments.revision2026 preflight --historical
 elif [[ "$MODE" == repair ]]; then
-  : "${LEGACY_ARCHIVE:?Set LEGACY_ARCHIVE to the extracted original archive inside WSL}"
+  : "${LEGACY_ARCHIVE:?Set LEGACY_ARCHIVE to the extracted original archive}"
   "$PY" -m experiments.revision2026 preflight
 else
   "$PY" -m experiments.revision2026 preflight "${MODEL_ARGS[@]}"

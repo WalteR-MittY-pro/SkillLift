@@ -277,7 +277,8 @@ def native_adapter(benchmark, task_id, model, root, protocol):
         return SkillsBenchPortfolioAdapter(SkillsBenchPortfolioSettings(
             project_root=ROOT, tasks_root=source_path("skillsbench") / "tasks", run_root=root,
             python_executable=Path(sys.executable), model="vllm/" + ep["MODEL"], sandbox="docker",
-            base_url=ep["BASE_URL"], api_key=ep["API_KEY"], patch_source=patch, agent="openhands-sse"))
+            base_url=ep["BASE_URL"], api_key=ep["API_KEY"], patch_source=patch, agent="openhands-sse",
+            prebuilt_image_template="prewarm/{task_id}:prewarm"))
     if benchmark != "wildclawbench":
         raise ValueError(benchmark)
     from skilllift.adapters.wildclawbench import WildClawPortfolioAdapter

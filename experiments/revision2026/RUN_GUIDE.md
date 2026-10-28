@@ -31,9 +31,9 @@ bash experiments/revision2026/run_all.sh supplementary
 | 模型 | 两实验合计最大同时执行任务数 |
 |---|---:|
 | GLM-5.1（含该任务内部的视觉辅助调用） | 4 |
-| DeepSeek-V4.1-Flash | 8 |
+| DeepSeek-V4.1-Flash | 4 |
 
-不是每个实验分别开 4/8。进程锁存放于 WSL 用户的 `~/.cache/skilllift/model-slots/`，同一用户在同一 WSL 环境另开实验命令时，也共享这些额度；锁在进程退出后由操作系统释放。另有逻辑任务锁，防止两条命令同时修改同一个任务目录。
+不是每个实验分别开 4/4。进程锁存放于 WSL 用户的 `~/.cache/skilllift/model-slots/`，同一用户在同一 WSL 环境另开实验命令时，也共享这些额度；锁在进程退出后由操作系统释放。另有逻辑任务锁，防止两条命令同时修改同一个任务目录。
 
 内存不足时可以降低并发，例如：
 

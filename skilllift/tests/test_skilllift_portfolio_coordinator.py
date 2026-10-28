@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import re
 from collections import Counter
 from pathlib import Path
@@ -502,3 +503,71 @@ def test_existing_shared_asset_scope_is_not_misclassified_as_a_new_skill(tmp_pat
 
     assert len(result.history) == 1
     assert result.history[0].is_valid
+
+
+def _store_direction() -> SearchDirection:
+    return SearchDirection(
+        "d1",
+        "r1",
+        "A clearer skill body improves reward",
+        "skill-body",
+        ("alpha",),
+        None,
+        ("task.md",),
+        "alpha/v1",
+    )
+
+
+def test_candidate_patch_with_carriage_returns_roundtrips(tmp_path: Path) -> None:
+    store = PortfolioStore(tmp_path / "run")
+    raw = (
+        "diff --git a/alpha/SKILL.md b/alpha/SKILL.md\r\n"
+        "--- a/alpha/SKILL.md\r\n"
+        "+++ b/alpha/SKILL.md\r\n"
+        "@@ -1 +1 @@\r\n"
+        "-old\r\n"
+        "+new\r\n"
+    )
+
+    record = store.save_candidate(
+        "task-1",
+        0,
+        "r000-c00",
+        _store_direction(),
+        raw,
+        parent_hash="parent",
+        result=None,
+        new_skill_names=(),
+        failure_kind="invalid_patch",
+        error="git apply check failed",
+    )
+    loaded = store.load_candidate("task-1", 0, "r000-c00")
+
+    assert loaded is not None
+    assert loaded.patch_hash == record.patch_hash
+    assert "\r" not in loaded.patch
+    patch_path = next((tmp_path / "run").glob("**/patch.diff"))
+    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == loaded.patch_hash
+
+
+def test_load_candidate_accepts_patches_written_by_text_mode_writers(tmp_path: Path) -> None:
+    store = PortfolioStore(tmp_path / "run")
+    record = store.save_candidate(
+        "task-1",
+        0,
+        "r000-c00",
+        _store_direction(),
+        "diff --git a/alpha/SKILL.md b/alpha/SKILL.md\n--- a/alpha/SKILL.md\n+++ b/alpha/SKILL.md\n",
+        parent_hash="parent",
+        result=None,
+        new_skill_names=(),
+        failure_kind="invalid_patch",
+        error="git apply check failed",
+    )
+    patch_path = next((tmp_path / "run").glob("**/patch.diff"))
+    patch_path.write_bytes(patch_path.read_bytes().replace(b"\n", b"\r\n"))
+
+    loaded = store.load_candidate("task-1", 0, "r000-c00")
+
+    assert loaded is not None
+    assert loaded.patch_hash == record.patch_hash

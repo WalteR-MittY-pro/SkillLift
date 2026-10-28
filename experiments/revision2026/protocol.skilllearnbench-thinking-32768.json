@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "models": [
+    "glm",
+    "deepseek"
+  ],
+  "evolution_runs": 1,
+  "test_repeats": 1,
+  "workers": 4,
+  "solver": {
+    "max_steps": 100,
+    "timeout_seconds": 1800,
+    "api_timeout_seconds": 1800,
+    "command_timeout_seconds": 120,
+    "max_output_tokens": 32768,
+    "temperature": 0.0,
+    "extra_body_by_model": {
+      "glm": {
+        "thinking": {
+          "type": "enabled"
+        }
+      },
+      "deepseek": {
+        "thinking": {
+          "type": "enabled"
+        }
+      }
+    }
+  },
+  "vision": {
+    "enabled_for": [
+      "glm"
+    ],
+    "model": "glm-5.3-flash",
+    "max_output_tokens": 16384,
+    "scope": "shared image-to-text tool for all GLM-5.1 methods; receives only images and a fixed observation prompt; historical 75.1 is reference-only"
+  },
+  "skilllearnbench": {
+    "revision": "726e1f79b96b0cb3d729d0e55a1c847e0b5353ae",
+    "train_instance": 1,
+    "methods": [
+      "no_skill",
+      "llm_written",
+      "skillopt",
+      "skilllift"
+    ],
+    "method_scope_note": "human_written omitted by author decision (2026-10-26); the Direct Oracle ablation runs on SkillsBench, not here",
+    "pilot_families": [
+      "court-form-filling",
+      "weighted-gdp-calculation"
+    ],
+    "claim": "held-out instances within seen task families",
+    "human_written_label": "author-provided reference skills; train-only authorship not established",
+    "harness": "shared OpenAI-compatible Docker tool agent with official environments and verifiers; not the original Claude CLI harness"
+  },
+  "skilllift": {
+    "max_rounds": 3,
+    "max_candidates_per_round": 3,
+    "candidate_concurrency": 1,
+    "mode_a_iters": 2,
+    "mode_b_iters": 2,
+    "mode_a_min_score_threshold": 0.85,
+    "rank_alignment_threshold": 0.9,
+    "max_context_chars": 120000,
+    "final_trials": 2,
+    "max_consecutive_infra_failures": 1
+  },
+  "skillopt": {
+    "revision": "84b36cd5564e8893569e50e37f02a81d10b55e27",
+    "num_epochs": 3,
+    "edit_budget": 4,
+    "min_edit_budget": 2,
+    "merge_batch_size": 8,
+    "sel_env_num": 2,
+    "analyst_workers": 1,
+    "selection_protocol": "fresh executions of instance 1; no held-out selection instances"
+  },
+  "direct_oracle": {
+    "structure": "matched_to_skilllift",
+    "edits_per_candidate": 1,
+    "patch_excerpt_chars": 4000,
+    "max_feedback_chars": 70000,
+    "rounds_and_candidates": "same max_rounds and max_candidates_per_round as skilllift; one oracle execution per valid candidate; at most 1 + max_rounds * max_candidates_per_round rollouts per cell before infrastructure retries",
+    "feedback": "scalar reward and solver execution trace only; official criterion names, statuses, expected values and assertion details are excluded, including during journal replay",
+    "acceptance": "strict oracle reward improvement only; equal-reward candidates keep the incumbent, with no official-criterion tie-break",
+    "stopping": "same as the SkillLift coordinator: anchor_terminal, terminal_candidate, two_no_improvement_rounds, round_budget_exhausted, all_candidates_invalid",
+    "infrastructure_retries": "TrainingOracle owns up to retry.oracle_max_attempts physical attempts; both optimizers use max_consecutive_infra_failures=1 to avoid multiplying that cap; an infrastructure failure is never a score"
+  },
+  "ablation": {
+    "benchmarks": [
+      "skillsbench"
+    ],
+    "methods": [
+      "skilllift",
+      "direct_oracle"
+    ],
+    "final_repeats": 3,
+    "matched_token_cap": false,
+    "arms": {
+      "glm": {
+        "methods": [
+          "direct_oracle"
+        ],
+        "independent_final": false
+      },
+      "deepseek": {
+        "methods": [
+          "skilllift",
+          "direct_oracle"
+        ],
+        "independent_final": true,
+        "final_repeats": 2
+      }
+    },
+    "primary_metric": "process_best: per-task best oracle score observed during evolution (anchor + candidates), the Table 2 definition; reported by `report` in process_best_summary.csv",
+    "published_reference": {
+      "glm": {
+        "skilllift": {
+          "benchmark": "skillsbench",
+          "mean_percent": 75.1,
+          "tasks": 87,
+          "source": "paper Table 2",
+          "metric": "mean per-task best evolved-skill score over 3 rollout seeds (paper Evaluation Protocol)"
+        }
+      }
+    },
+    "note": "Author decision 2026-10-26: SkillsBench only. GLM-5.1 runs only Direct Oracle and is compared with the published Table 2 SkillLift result; DeepSeek-V4.1-Flash has no published SkillLift result, so both arms run and are also compared on paired independent finals. final_repeats=3 at this level is the Table 2 rebuild default and is not used by the ablation arms."
+  },
+  "retry": {
+    "api_max_attempts": 4,
+    "api_base_seconds": 5,
+    "api_max_seconds": 300,
+    "oracle_max_attempts": 4,
+    "oracle_base_seconds": 30,
+    "oracle_max_seconds": 900,
+    "job_max_attempts": 1,
+    "job_base_seconds": 60,
+    "transient": "404, 429, 408, 409, 425, 5xx, connection reset/refused, timeouts; initial attempt plus 3 retries. Exhausted API requests are not retried again by outer layers; failed tasks are recorded and the queue continues",
+    "resume": "rerun the same command: finished jobs are skipped, failed/interrupted jobs relaunch, training cells replay <cell>/journal/training.jsonl; all attempts are kept"
+  },
+  "statistics": {
+    "confidence": 0.95,
+    "bootstrap_repeats": 10000,
+    "permutation_repeats": 20000,
+    "random_seed": 20261025,
+    "multiplicity": "Holm",
+    "incomplete_cohorts": "report coverage only; do not calculate CI or p"
+  },
+  "notes": [
+    "1 evolution_run by author decision (2026-10-26, time); this protocol does not estimate run-to-run variability. An evolution run is a fresh optimization process, not a retry.",
+    "The 2 internal SkillLift final trials are training-instance reevaluations, not held-out tests.",
+    "No skill, human-written and frozen LLM-written repeat execution once per run index; they are not re-authored.",
+    "Completed family/run cells resume by frozen content hash. Interrupted training cells restart in a new attempt.",
+    "Runtime estimates are planning assumptions, not measured guarantees. Review pilot costs and timing before the full run.",
+    "User configuration 2026-10-26: explicit thinking enabled for GLM and DeepSeek, non-streaming, solver max_output_tokens=32768 (reasoning plus answer; not a total input context limit), API timeout=1800 seconds. Separate model queues: GLM=4, DeepSeek=8. Use a new run root instead of mixing earlier smoke conditions."
+  ]
+}

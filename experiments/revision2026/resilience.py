@@ -105,6 +105,8 @@ class ResilientLLM:
             raise self.failure_state["error"]
         key = request_key("llm", getattr(self.client, "role", None), getattr(self.client, "model", None), system_prompt,
                           user_prompt, temperature, response_format, max_completion_tokens)
+        if getattr(self.client, "extra_body", None):
+            key = request_key(key, self.client.extra_body)
         if self.journal is not None:
             hit, value = self.journal.lookup(key)
             if hit:

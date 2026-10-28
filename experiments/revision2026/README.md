@@ -1,12 +1,14 @@
-# 补充实验：WSL + Windows Docker Desktop
+# 补充实验：WSL / macOS / Windows Docker Desktop
+
+Mac 单独运行 SkillsBench 消融请见 [Mac 执行手册](MAC_SKILLSBENCH_RUNBOOK.md)。
 
 本目录交付三个实验的代码、冻结技能、参数和恢复工具。真实模型与 Docker 运行在你的 WSL 机器完成；本机验证是无模型、无 Docker 的代码测试，以及对已有日志的只读恢复检查。
 
-**当前执行顺序：先全量完成 SkillLearnBench，再运行消融。请按 [SkillLearnBench 专用执行手册](SKILLLEARNBENCH_RUNBOOK.md)操作：两个终端分别跑 GLM（4 并发）与 DeepSeek（8 并发），覆盖四种方法；包含环境准备、pilot、正式执行、续跑和 640 个测试结果的验收命令。**
+**当前执行顺序：先全量完成 SkillLearnBench，再运行消融。请按 [SkillLearnBench 专用执行手册](SKILLLEARNBENCH_RUNBOOK.md)操作：两个终端分别跑 GLM（4 并发）与 DeepSeek（4 并发），覆盖四种方法；包含环境准备、pilot、正式执行、续跑和 640 个测试结果的验收命令。**
 
 当前优先执行泛化和 SkillsBench 消融，最新配置、图片工具和执行次数见[开跑前审计](AUDIT_2026-10-26.md)。`run_all.sh` 默认仅这两个实验；旧 Table 2 恢复/重建保留为显式入口。
 
-如需同时启动泛化和消融，使用[统一运行指南](RUN_GUIDE.md)；该入口共享 GLM 4 / DeepSeek 8 并发上限。当前先跑 SkillLearnBench 时使用上面的专用手册。两种入口都支持 404 重试，首次失败后最多再试 3 次，单题失败后继续队列。
+如需同时启动泛化和消融，使用[统一运行指南](RUN_GUIDE.md)；该入口共享 GLM 4 / DeepSeek 4 并发上限。当前先跑 SkillLearnBench 时使用上面的专用手册。两种入口都支持 404 重试，首次失败后最多再试 3 次，单题失败后继续队列。
 
 | 实验 | 运行内容 | 主要产物 |
 |---|---|---|
@@ -31,6 +33,78 @@ REVISION_PYTHON=python3.12 bash experiments/revision2026/setup.sh
 ```
 
 `setup.sh` 下载锁定的源码和任务数据，建立 **WSL 自己的** `.venv-revision2026`，安装依赖并运行无网络测试。不要复制 macOS/Windows 的虚拟环境。SkillsBench 是任务仓库，脚本安装它声明的依赖，不把它误当作可安装的 Python 包。
+
+### 1.0 或者：直接在 Windows Git Bash 中运行
+
+也可以不用 WSL，直接在 Windows 的仓库目录（如 `D:\code\SkillLift`）用 Git Bash 执行，Docker Desktop 保持 Linux containers 模式。需要 Windows 版 Python 3.12+（python.org 安装包，带 `py` 启动器）。**所有命令都在仓库根目录执行**，Windows 下解释器路径是 `Scripts/python.exe` 而不是 `bin/python`：
+
+```bash
+cd /d/code/SkillLift
+docker info && docker compose version
+bash experiments/revision2026/setup.sh            # 自动选 py -3.12；也可 REVISION_PYTHON="py -3.13"
+PY=.venv-revision2026/Scripts/python.exe
+$PY -m experiments.revision2026 preflight
+```
+
+Windows 下做了这些处理：仓库用 `.gitattributes` 固定 LF（CRLF 会让冻结技能哈希校验失败、`.sh` 在 bash 中报错）；`prepare` 以 `core.autocrlf=false` 检出上游源码，保证任务文件逐字节一致、`test.sh` 在 Linux 容器里可执行，若发现旧的 CRLF 检出会报错并要求删除重下；Python 自动以 UTF-8 模式运行（避免 GBK 解码错误）；文件锁改为跨平台实现。WildClaw 的 `weasyprint` 在 Windows 上还需要 GTK 运行库，这只影响 WildClaw 相关任务。没有在真实 Windows 机器上跑过端到端 pilot，先做 pilot 再全量。
+
+### 1.1 预拉取 / 预构建 SkillLearnBench 镜像（推荐，避免运行中途因网络失败）
+
+正式运行时，每个 SkillLearnBench 实例的镜像 `skilllift-slb-<hash>` 若本地不存在，会在 rollout 中现场 `docker build`：要拉 Docker Hub 基础镜像（`ubuntu:24.04`、`ubuntu:20.04`、`python:3.9.19/3.10/3.11-slim`），并在构建中访问 apt、PyPI、GitHub、Hugging Face、Apache 归档等。任何一步网络失败都会让该次评测成为 ERROR。下面的脚本提前调用**同一个** `docker_agent.base_image()`，镜像名与正式运行一致，默认使用相同构建上下文；可选换源配置见下文。构建好后正式运行只做 `docker image inspect` 命中，不再下载。
+
+```bash
+PY=.venv-revision2026/bin/python          # Windows Git Bash: PY=.venv-revision2026/Scripts/python.exe
+$PY scripts/prefetch_skilllearnbench_images.py --check        # 看缺哪些，不下载
+$PY scripts/prefetch_skilllearnbench_images.py --pilot        # 先做 pilot 的 2 个训练实例
+$PY scripts/prefetch_skilllearnbench_images.py --jobs 2       # 全部 20 家族 × 5 = 100 个实例
+```
+
+网络受限时可组合使用以下镜像拉取和代理选项：
+
+```bash
+# Docker Hub 镜像源（可重复，按顺序尝试，最后回退官方源；拉下后重新打回原标签）
+$PY scripts/prefetch_skilllearnbench_images.py --mirror docker.m.daocloud.io
+# 构建期代理（apt/pip/git/curl 用）。地址必须是容器内可达的，不能写 127.0.0.1；
+# Docker Desktop 下一般用 host.docker.internal
+$PY scripts/prefetch_skilllearnbench_images.py \
+  --build-arg HTTP_PROXY=http://host.docker.internal:7890 \
+  --build-arg HTTPS_PROXY=http://host.docker.internal:7890
+# 或直接沿用当前 shell 的 HTTP(S)_PROXY/NO_PROXY
+$PY scripts/prefetch_skilllearnbench_images.py --proxy-from-env
+```
+
+如果慢在 `apt-get install` 下载 Ubuntu 软件包，改的是 **镜像里的 apt 源**，改 WSL 的源或 Docker Hub 镜像源没有用。脚本支持在临时构建副本中切换 Ubuntu archive/security 源，兼容 Ubuntu 24.04 的 `/etc/apt/sources.list.d/ubuntu.sources` 和旧版 `/etc/apt/sources.list`，不修改 `.cache/revision2026/skilllearnbench` 内锁定的上游文件：
+
+```bash
+# 先跑两个 pilot 镜像；成功后去掉 --pilot 构建全部实例
+$PY scripts/prefetch_skilllearnbench_images.py --pilot --jobs 2 \
+  --ubuntu-mirror http://mirrors.ustc.edu.cn/ubuntu \
+  --build-arg HTTP_PROXY=http://host.docker.internal:7897 \
+  --build-arg HTTPS_PROXY=http://host.docker.internal:7897
+```
+
+镜像站的 apt 请求自动直连，GitHub/PyPI 等仍可用构建代理。最小 Ubuntu 镜像可能还没有 CA 证书，因此示例用 HTTP 引导；保留 Ubuntu 官方密钥和 apt 的签名校验，不关闭校验、不添加 `trusted=yes`。已具备 CA 证书时可传 HTTPS URL。配置依据见[中科大镜像站帮助](https://mirrors.ustc.edu.cn/help/ubuntu.html)。
+
+**实验环境记录：** 该选项会改变镜像内的 apt 配置，且镜像站同步延迟可能影响实际包版本，不能声称镜像逐字节相同。所有比较方法应复用同一批任务镜像。来源 URL、上游 Dockerfile 的 SHA-256 写入镜像 labels 和结果清单；构建副本保存在 `.cache/revision2026/image-prefetch/dockerfiles/`。换源配置也保留给官方 verifier 使用，评分脚本保持原样。基于 `python:*-slim` 的 Debian 环境不受这个选项影响。
+
+已有任务镜像仍会跳过；若需给已完成的镜像换源，使用 `--family <家族> --force` 定向重建。先在旧终端 Ctrl+C 停止旧预构建，再启动新命令，避免新进程等待旧构建持有的锁。构建期间可实时查看 `.cache/revision2026/image-prefetch/image-locks/*.live.log`，不用等构建结束才看到下载进度。
+
+失败直接重跑同一命令：已完成的镜像跳过，失败的从 Docker 层缓存断点继续；每个镜像默认重试 3 次（`--retries`）。结果清单写到 `.cache/revision2026/skilllearnbench_images.json`，构建日志在 `.cache/revision2026/image-prefetch/image-locks/*.build.log`。`--save ~/data/slb-images.tar` 可导出离线包，另一台机器用 `--load ~/data/slb-images.tar` 导入后再 `--check`。注意 Docker Desktop 磁盘空间（Settings → Resources → Disk image size），`fix-security-bug` 含 JDK、Maven 依赖和 Druid 源码，体积最大。脚本放在 `scripts/` 而非本目录，因为本目录 `*.py` 参与 run 的 `driver_hash`。
+
+**仍需联网的环节：** 官方 verifier（100 个 `tests/test.sh` 中有 95 个）在评分容器里现场执行 `apt-get install curl`、下载 `uv`/`pytest` 等；这是官方评分源码，不能为离线而修改。为降低评分失败，可在 WSL 的 `~/.docker/config.json` 配置 `proxies.default.httpProxy/httpsProxy/noProxy`，Docker CLI 会把它注入所有新建容器（包括 solver 容器，需在实验环境说明中注明）。评分因网络失败记为 ERROR，修复后用 `--retry-errors` 重跑，不会记成 0 分。模型 API 本身也需要网络。
+
+### 1.1b 预热 SkillsBench 镜像（消融 / Table 2 用）
+
+本 revision 的 SkillsBench 适配器为每题生成 environment manifest，直接指向 `prewarm/<任务>:prewarm`。BenchFlow 0.6.3 因而走 Compose 预构建镜像路径，启动时使用 `--pull never`，结束时保留镜像标签；正式运行不再从任务 Dockerfile 重建 `bf__<任务>`。开跑前应确认 87 个标签都在本机，且不要手动删除这些镜像。
+
+网络受限时可设置 `PREWARM_APT_MIRROR_HOST=mirrors.huaweicloud.com` 和 `PREWARM_PYPI_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple`：脚本只改临时 Dockerfile 副本中的 apt/PyPI 镜像地址和 apt 多镜像回退列表，不修改固定 SkillsBench 源文件；镜像会记录所用镜像源 label。
+
+```bash
+SKILLSBENCH_TASKS_DIR=$PWD/.cache/revision2026/skillsbench/tasks PREWARM_APT_MIRROR_HOST=mirrors.huaweicloud.com PREWARM_PYPI_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple PARALLEL=4 MAX_RETRY=3 bash scripts/prewarm.sh
+docker images --filter reference='prewarm/*' -q | wc -l     # 应为 87；失败清单见 runs/prewarm_failed_tasks.txt
+```
+
+### 1.2 WildClaw 镜像与素材
 
 WildClaw 还需要官方 OpenClaw 镜像和 workspace 素材；以下才会在目标机器下载镜像、加载镜像和准备视频/模型文件：
 
@@ -91,6 +165,7 @@ $PY -m experiments.revision2026 report --run-dir runs/revision2026/ablation
 范围（作者 2026-10-26 决定，见 `protocol.json` 的 `ablation.arms`）：
 
 - 只在 SkillsBench 87 题上运行，使用各题原生初始技能（与论文 Table 2 的演化方法相同）和原生 OpenHands 执行器。
+- 本地环境依赖 `tasks/fix-druid-loophole-cve/environment/apache-druid-0.20.0-bin.tar.gz` 和 `tasks/multilingual-video-dubbing/environment/prewarm_kokoro_hub.py` 可以保留在固定版本源码中。`sources.py` 单独登记这两个补充文件的精确路径和 SHA-256；出现时必须匹配登记内容。其他未跟踪任务文件、补充文件内容变化或已跟踪上游文件修改仍会阻止预检。
 - **GLM-5.1 只跑 `direct_oracle`**，对照论文 Table 2 的 SkillLift 结果 75.1（`ablation.published_reference`），不新跑 SkillLift，也不做独立复测。
 - **DeepSeek-V4.1-Flash 两组都新跑**（论文中的 DeepSeek 是 V4-Pro），冻结后每题再独立复测 2 次，报告逐题配对差值、CI 和 p。
 - 主指标是 Table 2 的口径：每题演化过程中观察到的最好 oracle 分数（含 anchor），由 `report` 写入 `report/process_best_summary.csv`；SkillLift 的 2 次内部 final 单独列出。这个口径使用了选择技能时的同一批执行，偏乐观，不是独立测试成绩；论文中需说明。已发表行只从论文抄录，不重算。
@@ -157,7 +232,7 @@ $PY -m experiments.revision2026 table2-rebuild \
 bash experiments/revision2026/run_all.sh supplementary
 ```
 
-每个模型先跑自己的 pilot，再交错执行泛化与消融训练，最后执行已经就绪的最终测试。GLM 总并发不超过 4、DeepSeek 不超过 8，两个模型互不等待。旧表需显式运行 `run_all.sh rebuild` 或设置 `LEGACY_ARCHIVE` 后运行 `run_all.sh repair`。
+每个模型先跑自己的 pilot，再交错执行泛化与消融训练，最后执行已经就绪的最终测试。GLM 总并发不超过 4、DeepSeek 不超过 4，两个模型互不等待。旧表需显式运行 `run_all.sh rebuild` 或设置 `LEGACY_ARCHIVE` 后运行 `run_all.sh repair`。
 
 **API 中断自动重试。** 404、429、408、409、425、5xx、连接重置和超时视为暂时性错误：
 

@@ -16,6 +16,28 @@ class NotFound(Exception):
     status_code = 404
 
 
+def test_framework_journal_separates_thinking_policies(tmp_path):
+    from experiments.revision2026.resilience import Journal, ResilientLLM
+    calls = []
+    class Client:
+        role, model = "generator", "glm"
+        def __init__(self, extra_body):
+            self.extra_body = extra_body
+        def call_text(self, *a, **kw):
+            calls.append(self.extra_body)
+            return str(len(calls))
+    def client(options):
+        # A new Journal represents restarting the worker; occurrences within
+        # one worker intentionally remain distinct trials.
+        return ResilientLLM(Client(options), http_retry.policy_from(load_protocol()), Journal(tmp_path / "journal.jsonl"))
+    assert client({}).call_text("system", "user") == "1"
+    disabled = {"thinking": {"type": "disabled"}}
+    assert client(disabled).call_text("system", "user") == "2"
+    assert client(disabled).call_text("system", "user") == "2"
+    assert client({}).call_text("system", "user") == "1"
+    assert len(calls) == 2
+
+
 def test_three_404_retries_succeed_on_fourth_attempt_and_exhaustion_does_not_multiply():
     calls, sleeps = [], []
     def request():
@@ -161,6 +183,46 @@ def test_cancelled_queue_does_not_start_more_processes(tmp_path, monkeypatch):
     assert summary["outcomes"][0]["status"] == "cancelled"
 
 
+@pytest.mark.parametrize("method", ["skillopt", "skilllift"])
+@pytest.mark.parametrize("kind", ["train", "evaluate"])
+def test_restart_skips_33_completed_jobs_and_runs_remaining_67(tmp_path, monkeypatch, method, kind):
+    """Completion comes from artifacts, even when task 34 still says running."""
+    from experiments.revision2026.common import digest
+    jobs = [dict(make_job(tmp_path, f"task-{i:03d}", kind), method=method) for i in range(1, 101)]
+    for index, job in enumerate(jobs):
+        if kind == "evaluate" or index < 33:
+            freeze(job)
+        if kind == "evaluate" and index < 33:
+            write_json(runner.evaluation_path(job) / "selected.json", {
+                "status": "OK", "config_hash": "cfg", "cell_identity": runner.evaluation_identity(job), "reward": 1,
+            })
+    interrupted = tmp_path / "jobs" / (digest(jobs[33]) + ".status.json")
+    write_json(interrupted, {"status": "running"})
+    calls = []
+
+    def execute(argv, **kwargs):
+        path = Path(argv[-1])
+        job = json.loads(path.read_text())
+        calls.append(job["family"])
+        if kind == "train":
+            freeze(job)
+        else:
+            write_json(runner.evaluation_path(job) / "selected.json", {
+                "status": "OK", "config_hash": "cfg", "cell_identity": runner.evaluation_identity(job), "reward": 1,
+            })
+        write_json(path.with_suffix(".status.json"), {"status": "complete"})
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(runner.subprocess, "run", execute)
+    summary = runner.run_jobs(jobs, tmp_path, 1)
+    assert summary["status"] == "complete" and summary["skipped_complete"] == 33
+    assert calls == [f"task-{i:03d}" for i in range(34, 101)]
+    calls.clear()
+    summary = runner.run_jobs(jobs, tmp_path, 1)
+    assert summary["skipped_complete"] == 100 and not calls
+    assert all(json.loads(p.read_text())["status"] == "complete" for p in (tmp_path / "jobs").glob("*.status.json"))
+
+
 def test_freeze_recovers_crash_between_copy_and_marker_without_losing_data(tmp_path):
     job = make_job(tmp_path, "task", "train")
     cell = tmp_path / "cell"
@@ -193,7 +255,7 @@ def test_both_experiments_share_model_pipeline_and_models_run_together(tmp_path,
     monkeypatch.setattr(statistics, "process_best_report", lambda *a: [])
     result = batch.run_supplementary(tmp_path, load_protocol())
     assert result["status"] == "complete"
-    for model, limit in [("glm", 4), ("deepseek", 8)]:
+    for model, limit in [("glm", 4), ("deepseek", 4)]:
         rows = [row for row in seen if row[0] == model]
         assert [row[1] for row in rows] == ["pilot", "queue"]
         assert all(row[2] == limit for row in rows)
@@ -202,13 +264,13 @@ def test_both_experiments_share_model_pipeline_and_models_run_together(tmp_path,
 
 def test_model_slots_bound_concurrency_across_separate_processes(tmp_path):
     script = '''
-import fcntl, json, sys, time
+import json, sys, time
 from pathlib import Path
+from experiments.revision2026.common import file_lock
 from experiments.revision2026.concurrency import model_slot
 root, model = Path(sys.argv[1]), sys.argv[2]
 def event(delta):
-    with (root / 'events.jsonl').open('a') as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+    with file_lock(root / 'events.lock'), (root / 'events.jsonl').open('a') as stream:
         stream.write(json.dumps({'model': model, 'delta': delta}) + '\\n')
         stream.flush()
 with model_slot(model, root / 'slots'):
@@ -225,4 +287,4 @@ with model_slot(model, root / 'slots'):
         row = json.loads(line); model = row["model"]
         active[model] += row["delta"]; peaks[model] = max(peaks[model], active[model])
     assert active == {"glm": 0, "deepseek": 0}
-    assert 1 < peaks["glm"] <= 4 and 1 < peaks["deepseek"] <= 8
+    assert 1 < peaks["glm"] <= 4 and 1 < peaks["deepseek"] <= 4

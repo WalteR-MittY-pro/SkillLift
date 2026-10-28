@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -80,10 +81,11 @@ def test_openhands_installer_converts_before_text_model_formatter(tmp_path, monk
     assert LLM().format_messages_for_llm([Message()]) == [["Observed pixels"]]
 
 
-def test_glm_solver_retries_the_request_and_converts_image_before_next_request(tmp_path, monkeypatch):
+@pytest.mark.parametrize("thinking,max_tokens", [("disabled", 16384), ("enabled", 32768)])
+def test_glm_solver_retries_the_request_and_converts_image_before_next_request(tmp_path, monkeypatch, thinking, max_tokens):
     import openai
     from experiments.revision2026 import docker_agent, resilience
-    main_requests, vision_requests, tool_calls = [], [], []
+    main_requests, vision_requests, tool_calls, client_options = [], [], [], []
     def create(**kwargs):
         if kwargs["model"] == "glm-5.3-flash":
             vision_requests.append(deepcopy(kwargs))
@@ -94,7 +96,10 @@ def test_glm_solver_retries_the_request_and_converts_image_before_next_request(t
         if len(main_requests) == 2:
             return response("Inspect image", calls=[SimpleNamespace(id="read-1", function=SimpleNamespace(name="read_image", arguments='{"path":"/image.png"}'))])
         return response("Done")
-    monkeypatch.setattr(openai, "OpenAI", lambda **kw: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    def client(**kw):
+        client_options.append(kw)
+        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(openai, "OpenAI", client)
     monkeypatch.setattr(resilience.time, "sleep", lambda _: None)
     monkeypatch.setattr(docker_agent, "endpoint", lambda model: {"MODEL": "glm-5.3-flash" if model == "glm_vision" else "GLM-5.1", "BASE_URL": "https://example.test", "API_KEY": "synthetic"})
     def tool(*args):
@@ -103,11 +108,32 @@ def test_glm_solver_retries_the_request_and_converts_image_before_next_request(t
     monkeypatch.setattr(docker_agent, "tool_result", tool)
     protocol = load_protocol()
     status, messages = docker_agent.run_solver("fake-container", "PRIVATE TASK GOAL", None, "glm",
-        {**protocol["solver"], "vision": protocol["vision"], "retry": protocol["retry"]}, tmp_path, tmp_path / "usage.jsonl")
+        {**protocol["solver"], "max_output_tokens": max_tokens,
+         "extra_body_by_model": {"glm": {"thinking": {"type": thinking}}},
+         "vision": protocol["vision"], "retry": protocol["retry"]}, tmp_path, tmp_path / "usage.jsonl")
     assert status == "completed" and len(main_requests) == 3 and len(tool_calls) == 1
+    assert client_options[0]["timeout"] == protocol["solver"]["api_timeout_seconds"]
+    assert all(request["stream"] is False for request in main_requests)
+    assert all(request["extra_body"] == {"thinking": {"type": thinking}} for request in main_requests)
+    assert all(request["max_tokens"] == max_tokens for request in main_requests)
+    events = [json.loads(line) for line in (tmp_path / "usage.jsonl").read_text().splitlines()]
+    failed = next(event for event in events if event["kind"] == "solver_request_failed")
+    assert failed["exception_chain"] == ["APIConnectionError"] and failed["http_status"] is None
     assert len(vision_requests) == 1 and "PRIVATE TASK GOAL" not in json.dumps(vision_requests)
     assert IMAGE not in json.dumps(main_requests) and "A visible chart" in json.dumps(main_requests[-1])
     assert any(message.get("role") == "tool" for message in messages)
+
+
+def test_truncated_tool_call_is_not_executed_or_marked_completed(tmp_path, monkeypatch):
+    import openai
+    from experiments.revision2026 import docker_agent
+    reply = response("", calls=[SimpleNamespace(id="partial", function=SimpleNamespace(name="shell", arguments='{"command":"unfinished'))])
+    reply.choices[0].finish_reason = "length"
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: reply))))
+    monkeypatch.setattr(docker_agent, "endpoint", lambda _: {"MODEL": "test", "BASE_URL": "https://example.test", "API_KEY": "synthetic"})
+    monkeypatch.setattr(docker_agent, "tool_result", lambda *a: pytest.fail("truncated command executed"))
+    status, _ = docker_agent.run_solver("fake", "task", None, "glm", load_protocol()["solver"], tmp_path, tmp_path / "usage.jsonl")
+    assert status == "output_token_limit"
 
 
 def test_vision_failure_stays_an_error_and_has_unknown_cost(tmp_path):
@@ -156,6 +182,8 @@ def test_skillopt_http_retry_is_not_multiplied_by_sdk_or_backend_loops(tmp_path,
     from types import ModuleType
     from experiments.revision2026 import optimization, resilience
     attempts, sdk_options, backend_retries = [], [], []
+    pacing = []
+    monkeypatch.setattr(optimization, "wait_for_api_request", pacing.append)
     def create(**kwargs):
         attempts.append(1)
         if len(attempts) < 4:
@@ -178,25 +206,37 @@ def test_skillopt_http_retry_is_not_multiplied_by_sdk_or_backend_loops(tmp_path,
     monkeypatch.setattr(resilience.time, "sleep", lambda _: None)
     optimization._harden_skillopt(load_protocol(), tmp_path / "usage.jsonl")
     assert backend._chat_messages_impl([], 100, 10, "stage", role="optimizer") == "ok"
+    assert pacing == ["other"] * 4
     assert len(attempts) == 4 and backend_retries == [1] and sdk_options == [{"max_retries": 0}]
 
 
 def test_run_all_supplementary_does_not_launch_historical_rebuild(tmp_path):
     import os
+    import shutil
     import subprocess
+    bash = shutil.which("bash")
+    if os.name == "nt":
+        # System32/bash.exe runs WSL and cannot consume Windows temp paths.
+        git = shutil.which("git")
+        candidate = Path(git).resolve().parents[1] / "bin/bash.exe" if git else None
+        if candidate is None or not candidate.is_file():
+            pytest.skip("Git Bash is required to exercise the Windows shell launcher")
+        bash = str(candidate)
+    elif bash is None:
+        pytest.skip("Bash is required for the shell launcher")
     source = ROOT / "experiments/revision2026/run_all.sh"
     script = tmp_path / "experiments/revision2026/run_all.sh"
     script.parent.mkdir(parents=True)
-    script.write_text(source.read_text())
-    python = tmp_path / ".venv-revision2026/bin/python"
+    script.write_text(source.read_text(), newline="\n")
+    python = tmp_path / (".venv-revision2026/Scripts/python.exe" if os.name == "nt" else ".venv-revision2026/bin/python")
     python.parent.mkdir(parents=True)
-    python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> calls.log\n')
+    python.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> calls.log\n', newline="\n")
     python.chmod(0o755)
     env = {key: value for key, value in os.environ.items() if key not in {"LEGACY_ARCHIVE", "WORKERS", "RUN_ROOT"}}
-    subprocess.run(["bash", str(script), "supplementary", "deepseek"], check=True, cwd=tmp_path, env=env, capture_output=True)
+    subprocess.run([bash, script.as_posix(), "supplementary", "deepseek"], check=True, cwd=tmp_path, env=env, capture_output=True)
     calls = (tmp_path / "calls.log").read_text().splitlines()
     assert len(calls) == 1 and "supplementary" in calls[0] and "--models deepseek" in calls[0]
-    assert "--glm-workers 4" in calls[0] and "--deepseek-workers 8" in calls[0]
+    assert "--glm-workers 4" in calls[0] and "--deepseek-workers 4" in calls[0]
     assert not any("table2" in line or "historical" in line or "wildclaw" in line for line in calls)
 
 

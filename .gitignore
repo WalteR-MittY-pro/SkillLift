@@ -23,3 +23,9 @@ tau2-bench/
 # Reproducible experiment downloads and machine-local execution state
 .cache/revision2026/
 .venv-revision2026/
+.venv-revision2026-windows/
+
+# Local experiment output and downloaded standalone dependency repository
+*.log
+/logs/
+/SkillOpt/

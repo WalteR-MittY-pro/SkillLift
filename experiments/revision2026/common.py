@@ -3,11 +3,92 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import sys
+import tempfile
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+IS_WINDOWS = os.name == "nt"
+
+
+def ensure_utf8_mode(module_args):
+    """On Windows, re-run this interpreter in UTF-8 mode before doing any work.
+
+    Windows Python otherwise decodes files and subprocess output with the ANSI
+    code page (GBK on Chinese systems), which breaks UTF-8 task files and Docker
+    output. Child workers inherit PYTHONUTF8 from this process.
+    """
+    if not IS_WINDOWS or sys.flags.utf8_mode:
+        return
+    os.environ["PYTHONUTF8"] = "1"
+    raise SystemExit(subprocess.call([sys.executable, "-X", "utf8", *module_args]))
+
+
+def try_lock_handle(handle):
+    """Take an exclusive, non-blocking lock on an open handle; True when acquired."""
+    if IS_WINDOWS:
+        import msvcrt
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+    import fcntl
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+def unlock_handle(handle):
+    if IS_WINDOWS:
+        import msvcrt
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+@contextmanager
+def file_lock(path, blocking=True):
+    """Exclusive inter-process lock (fcntl on Linux, msvcrt on Windows).
+
+    Non-blocking acquisition failure raises BlockingIOError on both platforms.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as handle:
+        while not try_lock_handle(handle):
+            if not blocking:
+                raise BlockingIOError(f"Lock is held by another process: {path}")
+            time.sleep(0.2)
+        try:
+            yield handle
+        finally:
+            unlock_handle(handle)
+
+
+@contextmanager
+def file_lock_or_none(path):
+    """Try to take a file lock without waiting; yield None when another process holds it."""
+    lock = file_lock(path, blocking=False)
+    try:
+        handle = lock.__enter__()
+    except BlockingIOError:
+        yield None
+        return
+    try:
+        yield handle
+    finally:
+        lock.__exit__(None, None, None)
 
 
 def digest(value):
@@ -21,9 +102,26 @@ def read_json(path):
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    # A fresh name avoids reopening a just-renamed file that Windows scanners
+    # may still hold. Keep replacement atomic so interrupted writes stay safe.
+    fd, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+        for attempt in range(10):
+            try:
+                temporary.replace(path)
+                break
+            except PermissionError:
+                if not IS_WINDOWS or attempt == 9:
+                    raise
+                time.sleep(min(0.05 * 2 ** attempt, 0.5))
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass  # Preserve the original write failure if cleanup is also blocked.
 
 
 def utc_now():

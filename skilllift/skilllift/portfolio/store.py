@@ -176,6 +176,10 @@ class PortfolioStore:
                 raise PersistenceError(f"incomplete candidate record: {target}")
             return existing
         target.parent.mkdir(parents=True, exist_ok=True)
+        # Invalid candidates persist the raw generator output, which can carry
+        # CR line endings; normalize so the persisted patch hashes identically
+        # on write and read regardless of platform newline conventions.
+        patch = patch.replace("\r\n", "\n").replace("\r", "\n")
         with tempfile.TemporaryDirectory(prefix=f".{candidate_id}-", dir=target.parent) as temporary:
             temp_root = Path(temporary) / "record"
             temp_root.mkdir()
@@ -186,7 +190,7 @@ class PortfolioStore:
                 "round_index": round_index,
                 "parent_hash": parent_hash,
                 "candidate_hash": result.portfolio.tree_hash if result else None,
-                "patch_hash": result.patch_hash if result else hashlib.sha256(patch.encode("utf-8")).hexdigest(),
+                "patch_hash": hashlib.sha256(patch.encode("utf-8")).hexdigest(),
                 "new_skill_names": list(new_skill_names),
                 "changed_paths": list(result.changed_paths) if result else [],
                 "is_valid": result is not None,
@@ -415,5 +419,7 @@ class PortfolioStore:
     def _write_text_atomic(path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temporary.write_text(text, encoding="utf-8")
+        # Byte-exact write: text mode translates newlines per platform and
+        # would corrupt the roundtrip for content that already contains CR.
+        temporary.write_bytes(text.encode("utf-8"))
         os.replace(temporary, path)

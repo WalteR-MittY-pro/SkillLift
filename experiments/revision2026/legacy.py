@@ -155,7 +155,8 @@ def run_coevo(oracle, protocol, root, model, ledger, journal=None):
         settings = SkillsBenchEvolutionSettings(project_root=ROOT, run_root=Path(root) / "coevo", tasks_root=source_path("skillsbench") / "tasks",
             split_path=Path(root) / "unused-split.json", python_executable=Path(sys.executable), model="vllm/" + ep["MODEL"], sandbox="docker",
             base_url=ep["BASE_URL"], api_key=ep["API_KEY"], patch_source=ROOT / "scripts/oh_skill_patch.py", agent="openhands-sse",
-            framework_model=ep["MODEL"], use_stream=True, algorithm_params=params)
+            framework_model=ep["MODEL"], use_stream=True, algorithm_params=params,
+            prebuilt_image_template="prewarm/{task_id}:prewarm")
         CoEvoSkillsSkillsBenchRunner(settings, generator=generator, verifier=verifier).run_task(oracle.family)
         experiment = settings.run_root / "tasks" / oracle.family / "coevoskills_experiment"
         best = read_json(experiment / "checkpoint.json")["result"]["best_skill"]

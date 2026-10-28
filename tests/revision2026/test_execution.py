@@ -99,6 +99,23 @@ def test_failed_verifier_does_not_become_a_valid_reward(tmp_path, monkeypatch):
     assert stop < score
 
 
+def test_existing_task_image_is_reused_without_building(tmp_path, monkeypatch):
+    from experiments.revision2026 import docker_agent as module
+    calls = []
+
+    def execute(args, **kwargs):
+        calls.append(args)
+        assert args[:3] == ["docker", "image", "inspect"]
+        return SimpleNamespace(returncode=0, stdout=json.dumps([{"Id": "sha256:cached"}]), stderr="")
+
+    monkeypatch.setattr(module, "command", execute)
+    monkeypatch.setattr(module, "official_helpers", lambda: pytest.fail("Attempted to prepare a build on a cache hit"))
+    image = module.base_image(SimpleNamespace(task_id="python-scala-translation/python-scala-translation-1"), tmp_path)
+    assert len(calls) == 1
+    record = json.loads((tmp_path / "image-locks" / (image + ".events.jsonl")).read_text())
+    assert record["reused"] is True and record["image_id"] == "sha256:cached"
+
+
 def _direct_oracle_harness(tmp_path, monkeypatch, outcomes, *, max_rounds=3, width=3):
     """Run run_direct_oracle against a scripted oracle; outcomes are (reward, passed, total) or None for an infra failure."""
     from skilllift.coordinator import CandidateEvaluation, RewardSpec
@@ -246,6 +263,7 @@ def test_skillopt_configuration_never_serializes_role_secrets(tmp_path):
     assert secret not in json.dumps(cfg)
     assert not any("api_key" in key for key in cfg)
     assert cfg["eval_test"] is False
+    assert cfg["optimizer_openai_compatible_timeout_seconds"] == 900
 
 
 def test_native_api_failure_is_not_a_valid_zero_but_solver_budget_is(tmp_path):

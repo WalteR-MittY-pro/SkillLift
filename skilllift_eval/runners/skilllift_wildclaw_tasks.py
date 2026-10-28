@@ -34,6 +34,7 @@ class WildClawBatchSettings:
     config_path: Path
     model: str
     categories: tuple[int, ...] = ALL_CATEGORIES
+    task_ids: tuple[str, ...] = ()
 
 
 def discover_wildclaw_tasks(wildclaw_root: Path, categories: tuple[int, ...]) -> tuple[WildClawTask, ...]:
@@ -68,6 +69,12 @@ def run_wildclaw_batch(settings: WildClawBatchSettings) -> dict[str, Any]:
         raise ValueError("skilllift_eval config must be a YAML object")
     endpoint = resolve_endpoints(config, [settings.model])[settings.model]
     tasks = discover_wildclaw_tasks(settings.wildclaw_root, settings.categories)
+    if settings.task_ids:
+        selected = set(settings.task_ids)
+        unknown = sorted(selected - {task.task_id for task in tasks})
+        if unknown:
+            raise ValueError(f"unknown WildClaw task ids for categories {sorted(set(settings.categories))}: {unknown}")
+        tasks = tuple(task for task in tasks if task.task_id in selected)
     manifest = {
         "schema_version": 1,
         "runner_version": BATCH_RUNNER_VERSION,
