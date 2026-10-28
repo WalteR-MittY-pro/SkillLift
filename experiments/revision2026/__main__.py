@@ -116,8 +116,8 @@ def main(argv=None):
     together.add_argument("--run-dir", type=Path, required=True)
     together.add_argument("--protocol", type=Path)
     together.add_argument("--models", choices=["glm", "deepseek"], nargs="+")
-    together.add_argument("--glm-workers", type=int, default=4)
-    together.add_argument("--deepseek-workers", type=int, default=4)
+    together.add_argument("--glm-workers", type=int, default=2)
+    together.add_argument("--deepseek-workers", type=int, default=2)
     together.add_argument("--plan-only", action="store_true")
     for name in ["pilot", "generalization", "ablation", "table2-rebuild"]:
         p = sub.add_parser(name)
@@ -214,8 +214,8 @@ def main(argv=None):
     if getattr(args, "models", None):
         protocol["models"] = list(dict.fromkeys(args.models))
     if args.command == "supplementary":
-        if not 1 <= args.glm_workers <= 4 or not 1 <= args.deepseek_workers <= 4:
-            raise ValueError("GLM workers must be 1–4; DeepSeek workers must be 1–4")
+        if not 1 <= args.glm_workers <= 2 or not 1 <= args.deepseek_workers <= 2:
+            raise ValueError("GLM workers must be 1–2; DeepSeek workers must be 1–2")
         if not args.plan_only:
             preflight(protocol["models"], ["skilllearnbench", "skillsbench"], protocol=protocol)
         from .batch import run_supplementary

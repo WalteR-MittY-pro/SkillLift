@@ -236,7 +236,7 @@ def test_run_all_supplementary_does_not_launch_historical_rebuild(tmp_path):
     subprocess.run([bash, script.as_posix(), "supplementary", "deepseek"], check=True, cwd=tmp_path, env=env, capture_output=True)
     calls = (tmp_path / "calls.log").read_text().splitlines()
     assert len(calls) == 1 and "supplementary" in calls[0] and "--models deepseek" in calls[0]
-    assert "--glm-workers 4" in calls[0] and "--deepseek-workers 4" in calls[0]
+    assert "--glm-workers 2" in calls[0] and "--deepseek-workers 2" in calls[0]
     assert not any("table2" in line or "historical" in line or "wildclaw" in line for line in calls)
 
 

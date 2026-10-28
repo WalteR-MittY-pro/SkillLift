@@ -31,11 +31,11 @@ SKILLSBENCH_TASKS_DIR="$PWD/.cache/revision2026/skillsbench/tasks"   PARALLEL=4 
 不要使用 `run_all.sh supplementary`，该入口会同时安排 SkillLearnBench 泛化。消融专用命令如下，两个模型可分别在两个终端运行：
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 ablation   --models glm --workers 4 --run-dir runs/skillsbench-ablation/glm
+.venv-revision2026/bin/python -m experiments.revision2026 ablation   --models glm --workers 2 --run-dir runs/skillsbench-ablation/glm
 ```
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 ablation   --models deepseek --workers 4 --run-dir runs/skillsbench-ablation/deepseek
+.venv-revision2026/bin/python -m experiments.revision2026 ablation   --models deepseek --workers 2 --run-dir runs/skillsbench-ablation/deepseek
 ```
 
 默认使用 `experiments/revision2026/protocol.json`。GLM 只跑 Direct Oracle，与论文 SkillLift 75.1 的历史成绩对照；DeepSeek 跑 SkillLift 和 Direct Oracle，并做独立复测。没有更改该算法范围，也不把历史成绩当作相同实验条件下的新测量。

@@ -255,7 +255,7 @@ def test_both_experiments_share_model_pipeline_and_models_run_together(tmp_path,
     monkeypatch.setattr(statistics, "process_best_report", lambda *a: [])
     result = batch.run_supplementary(tmp_path, load_protocol())
     assert result["status"] == "complete"
-    for model, limit in [("glm", 4), ("deepseek", 4)]:
+    for model, limit in [("glm", 2), ("deepseek", 2)]:
         rows = [row for row in seen if row[0] == model]
         assert [row[1] for row in rows] == ["pilot", "queue"]
         assert all(row[2] == limit for row in rows)
@@ -287,4 +287,4 @@ with model_slot(model, root / 'slots'):
         row = json.loads(line); model = row["model"]
         active[model] += row["delta"]; peaks[model] = max(peaks[model], active[model])
     assert active == {"glm": 0, "deepseek": 0}
-    assert 1 < peaks["glm"] <= 4 and 1 < peaks["deepseek"] <= 4
+    assert peaks["glm"] == 2 and peaks["deepseek"] == 2

@@ -32,7 +32,7 @@
 | A | 拉取分支，准备环境和接口 | setup 成功，预检输出 `configuration_ready` |
 | B | 只生成两个模型的正式计划 | 每模型 400 个调度任务：80 个训练/冻结任务、320 个测试任务 |
 | C | 两模型各跑训练侧 pilot | 各自 `execution_summary.json` 为 `complete`；确认真实接口和容器可运行 |
-| D | 两个终端分别启动全量泛化 | 自动完成训练、冻结、测试；GLM 4 / DeepSeek 4 并发 |
+| D | 两个终端分别启动全量泛化 | 自动完成训练、冻结、测试；GLM 2 / DeepSeek 2 并发 |
 | E | 处理失败、重复原命令、检查报告 | 8 个模型×方法结果全部完整，每行 80/80，总计 640 个有效测试结果 |
 | F | 归档报告与原始证据 | 保存运行目录、版本和配置记录，随后单独安排消融 |
 
@@ -132,8 +132,8 @@ $py = ".\.venv-revision2026\Scripts\python.exe"
 ```bash
 PY=.venv-revision2026/bin/python
 RUN_ROOT=runs/skilllearnbench-first-v1
-$PY -m experiments.revision2026 generalization --models glm --workers 4 --run-dir "$RUN_ROOT/glm/generalization" --plan-only
-$PY -m experiments.revision2026 generalization --models deepseek --workers 4 --run-dir "$RUN_ROOT/deepseek/generalization" --plan-only
+$PY -m experiments.revision2026 generalization --models glm --workers 2 --run-dir "$RUN_ROOT/glm/generalization" --plan-only
+$PY -m experiments.revision2026 generalization --models deepseek --workers 2 --run-dir "$RUN_ROOT/deepseek/generalization" --plan-only
 ```
 
 核对任务数和训练/测试划分：
@@ -169,13 +169,13 @@ Pilot 使用 `court-form-filling` 和 `weighted-gdp-calculation` 的训练实例
 终端 A：
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 pilot --models glm --workers 4 --run-dir runs/skilllearnbench-first-v1/glm/pilot
+.venv-revision2026/bin/python -m experiments.revision2026 pilot --models glm --workers 2 --run-dir runs/skilllearnbench-first-v1/glm/pilot
 ```
 
 终端 B：
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 pilot --models deepseek --workers 4 --run-dir runs/skilllearnbench-first-v1/deepseek/pilot
+.venv-revision2026/bin/python -m experiments.revision2026 pilot --models deepseek --workers 2 --run-dir runs/skilllearnbench-first-v1/deepseek/pilot
 ```
 
 各模型 pilot 结束后，查看对应 `pilot/execution_summary.json`，应为 `complete`。有失败则查看 `pilot/jobs/*.stderr.log` 和单题日志，修复后重跑该模型同一条 pilot 命令。重点检查模型路由、429/404、图片解析、容器评分、单题用时和 token 记录。
@@ -187,13 +187,13 @@ Pilot 通过不证明全部 20 类任务及外部服务都可运行，也不能�
 终端 A，GLM 全部四种方法：
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 generalization --models glm --workers 4 --run-dir runs/skilllearnbench-first-v1/glm/generalization
+.venv-revision2026/bin/python -m experiments.revision2026 generalization --models glm --workers 2 --run-dir runs/skilllearnbench-first-v1/glm/generalization
 ```
 
 终端 B，DeepSeek 全部四种方法：
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 generalization --models deepseek --workers 4 --run-dir runs/skilllearnbench-first-v1/deepseek/generalization
+.venv-revision2026/bin/python -m experiments.revision2026 generalization --models deepseek --workers 2 --run-dir runs/skilllearnbench-first-v1/deepseek/generalization
 ```
 
 两条命令各自自动完成训练、冻结、全部测试和统计/成本报告。无需为四种方法分别启动额外批次，也不要通过反复修改方法清单来分别开跑。
@@ -306,11 +306,11 @@ cp .cache/revision2026/resolved-requirements.txt runs/skilllearnbench-first-v1/r
 等第 9 节两个模型均通过验收，再按 [统一运行指南](RUN_GUIDE.md)及 [README 消融说明](README.md#4-direct-oracle-消融skillsbench)单独启动 `ablation`。以下是后续步骤，第 1–9 节无需执行；两条命令可分别放在两个终端：
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 ablation --models glm --workers 4 --run-dir runs/skilllearnbench-first-v1/glm/ablation
+.venv-revision2026/bin/python -m experiments.revision2026 ablation --models glm --workers 2 --run-dir runs/skilllearnbench-first-v1/glm/ablation
 ```
 
 ```bash
-.venv-revision2026/bin/python -m experiments.revision2026 ablation --models deepseek --workers 4 --run-dir runs/skilllearnbench-first-v1/deepseek/ablation
+.venv-revision2026/bin/python -m experiments.revision2026 ablation --models deepseek --workers 2 --run-dir runs/skilllearnbench-first-v1/deepseek/ablation
 ```
 
 这些命令不会重新触发已经完成的 SkillLearnBench 实验。
@@ -330,7 +330,7 @@ cp .cache/revision2026/resolved-requirements.txt runs/skilllearnbench-first-v1/r
 该字段同时作用于 SkillLearnBench solver、SkillLift 框架角色和 SkillOpt 优化 API。省略时不发送额外参数，不改变正式协议的思考策略。SkillLift journal key 包含该配置，避免把不同思考策略的响应当作相同请求复用。改变实验条件应使用新的运行目录；同条件中断恢复使用原目录。
 
 ```powershell
-.\.venv-revision2026\Scripts\python.exe -X utf8 -m experiments.revision2026 pilot --models glm --workers 4 --protocol runs/skilllearnbench-python-scala-nothink-v1/smoke_protocol.json --run-dir runs/skilllearnbench-python-scala-nothink-v1/glm/pilot
+.\.venv-revision2026\Scripts\python.exe -X utf8 -m experiments.revision2026 pilot --models glm --workers 2 --protocol runs/skilllearnbench-python-scala-nothink-v1/smoke_protocol.json --run-dir runs/skilllearnbench-python-scala-nothink-v1/glm/pilot
 ```
 
 2026-10-26 排查中，原 300 秒客户端超时改为 900 秒后，非流式请求在约 389–431 秒返回。长请求的 16,384 输出 token 几乎全是 reasoning tokens，未写出 Tokenizer.scala；不能把这种空响应标为正常完成。请求模型 `GLM-5.1` 的响应 model 为 `glm-5.3`，报告必须保留两者，不能仅凭请求名认定实际模型版本。简单探测返回 reasoning tokens=0，但实际任务调用仍返回非零 reasoning tokens，因此本轮只能标记为“请求关闭思考”，不能声称服务端完全关闭。当前使用的是 `/api/coding/paas/v4` 端点。[官方文档](https://docs.bigmodel.cn/cn/guide/capabilities/thinking) 说明 GLM-5.3 不再支持关闭思考；Coding Plan 的具体路由行为不能仅从请求模型名称推断。
@@ -352,10 +352,10 @@ Windows 入口优先使用 `.venv-revision2026-windows/Scripts/python.exe`，无
 切换 Windows/WSL 时先结束另一端的实验进程，再用相同结果目录启动；两端的模型并发槽位不共享，不能把同时启动当成恢复。失败任务会重试，已完成且配置一致的项目会跳过。
 
 ```powershell
-# DeepSeek：4 并发
+# DeepSeek：2 并发
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\code\SkillLift\experiments\revision2026\run_skilllearnbench.ps1 -Model deepseek
 
-# GLM：4 并发
+# GLM：2 并发
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\code\SkillLift\experiments\revision2026\run_skilllearnbench.ps1 -Model glm
 ```
 
@@ -380,4 +380,4 @@ bash experiments/revision2026/run_skilllearnbench.sh glm
 
 ### API 请求间隔
 
-同一模型提供方的请求开始时间至少间隔 0.5 秒，多个 worker 和实验进程共用此限制；DeepSeek 与 GLM 分别计时。覆盖任务 solver、SkillOpt、SkillLift 和宿主机图像读取请求。空闲超过 0.5 秒时直接发送，网络响应期间不占用间隔锁，仍可保持 4 并发。SkillLift 在本实验中不再叠加原有的 1 秒调用前等待。失败请求继续遵循 Retry-After 和指数退避。修改代码后，新启动的 worker 生效；已运行的 worker 需要重启才能采用此策略。
+同一模型提供方的请求开始时间至少间隔 0.5 秒，多个 worker 和实验进程共用此限制；DeepSeek 与 GLM 分别计时。覆盖任务 solver、SkillOpt、SkillLift 和宿主机图像读取请求。空闲超过 0.5 秒时直接发送，网络响应期间不占用间隔锁，仍可保持 2 并发。SkillLift 在本实验中不再叠加原有的 1 秒调用前等待。失败请求继续遵循 Retry-After 和指数退避。修改代码后，新启动的 worker 生效；已运行的 worker 需要重启才能采用此策略。

@@ -19,7 +19,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 if (-not (Test-Path -LiteralPath $python)) {
     throw 'Missing Windows Python environment. Run setup.sh skilllearnbench in Windows Git Bash (not WSL).'
 }
-$workers = 4
+$workers = 2
 $protocol = Join-Path $PSScriptRoot 'protocol.skilllearnbench-thinking-32768.json'
 Push-Location $repo
 $originalDockerContext = $env:DOCKER_CONTEXT

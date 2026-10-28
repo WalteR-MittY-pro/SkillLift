@@ -4,11 +4,11 @@ Mac 单独运行 SkillsBench 消融请见 [Mac 执行手册](MAC_SKILLSBENCH_RUN
 
 本目录交付三个实验的代码、冻结技能、参数和恢复工具。真实模型与 Docker 运行在你的 WSL 机器完成；本机验证是无模型、无 Docker 的代码测试，以及对已有日志的只读恢复检查。
 
-**当前执行顺序：先全量完成 SkillLearnBench，再运行消融。请按 [SkillLearnBench 专用执行手册](SKILLLEARNBENCH_RUNBOOK.md)操作：两个终端分别跑 GLM（4 并发）与 DeepSeek（4 并发），覆盖四种方法；包含环境准备、pilot、正式执行、续跑和 640 个测试结果的验收命令。**
+**当前执行顺序：先全量完成 SkillLearnBench，再运行消融。请按 [SkillLearnBench 专用执行手册](SKILLLEARNBENCH_RUNBOOK.md)操作：两个终端分别跑 GLM（2 并发）与 DeepSeek（2 并发），覆盖四种方法；包含环境准备、pilot、正式执行、续跑和 640 个测试结果的验收命令。**
 
 当前优先执行泛化和 SkillsBench 消融，最新配置、图片工具和执行次数见[开跑前审计](AUDIT_2026-10-26.md)。`run_all.sh` 默认仅这两个实验；旧 Table 2 恢复/重建保留为显式入口。
 
-如需同时启动泛化和消融，使用[统一运行指南](RUN_GUIDE.md)；该入口共享 GLM 4 / DeepSeek 4 并发上限。当前先跑 SkillLearnBench 时使用上面的专用手册。两种入口都支持 404 重试，首次失败后最多再试 3 次，单题失败后继续队列。
+如需同时启动泛化和消融，使用[统一运行指南](RUN_GUIDE.md)；该入口共享 GLM 2 / DeepSeek 2 并发上限。当前先跑 SkillLearnBench 时使用上面的专用手册。两种入口都支持 404 重试，首次失败后最多再试 3 次，单题失败后继续队列。
 
 | 实验 | 运行内容 | 主要产物 |
 |---|---|---|
@@ -137,7 +137,7 @@ WildClaw 还需要官方 OpenClaw 镜像和 workspace 素材；以下才会在�
 ```bash
 PY=.venv-revision2026/bin/python
 $PY -m experiments.revision2026 pilot --run-dir runs/revision2026/pilot --workers 2
-$PY -m experiments.revision2026 generalization --run-dir runs/revision2026/generalization --workers 4
+$PY -m experiments.revision2026 generalization --run-dir runs/revision2026/generalization --workers 2
 ```
 
 Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，覆盖 protocol 中的全部方法，优化预算缩小为一轮。它用于暴露接入/成本/耗时问题，不用于论文最终统计，也不能靠两个任务证明无技能分数在 30–60。
@@ -158,7 +158,7 @@ Pilot 只使用预先指定的 PDF 表单和 GDP 表格两类**训练实例**，
 ## 4. Direct Oracle 消融（SkillsBench）
 
 ```bash
-$PY -m experiments.revision2026 ablation --run-dir runs/revision2026/ablation --workers 4
+$PY -m experiments.revision2026 ablation --run-dir runs/revision2026/ablation --workers 2
 $PY -m experiments.revision2026 report --run-dir runs/revision2026/ablation
 ```
 
@@ -194,7 +194,7 @@ $PY -m experiments.revision2026 repair-plan \
   --archive ~/data/expirment --output runs/revision2026/legacy-audit
 $PY -m experiments.revision2026 repair-run \
   --plan runs/revision2026/legacy-audit/repair_plan.json \
-  --run-dir runs/revision2026/table2-repair --workers 4
+  --run-dir runs/revision2026/table2-repair --workers 2
 ```
 
 工具读取原始逐题 metadata，区分 selection best、final、重试与完整优化运行；只有实际 portfolio hash 与旧 winner 一致的资产才自动复测。原日志不修改，新结果保存在新的 run 目录。缺失资产仍留在预期分母中，成为 blocked cells，不会通过删除任务生成貌似完整的 CI。
@@ -207,7 +207,7 @@ $PY -m experiments.revision2026 repair-run \
 
 ```bash
 $PY -m experiments.revision2026 table2-rebuild \
-  --run-dir runs/revision2026/table2-fresh --workers 4
+  --run-dir runs/revision2026/table2-fresh --workers 2
 ```
 
 覆盖两个旧 benchmark 的原模型组合与全部六方法：No skill、Human-written、LLM-written、SkillOpt、CoEvoSkills、SkillLift。单独使用原模型配置，绝不将 DeepSeek Flash 替代旧 Pro。共同 GPT-6-SOL 一次性技能按任务生成并缓存；SkillOpt/SkillLift 从该技能起步。CoEvoSkills 复用仓库现有原生初始化与 surrogate 机制，并在配置中注明其初始化差异，不声称它与其他方法拥有同一初始技能池。

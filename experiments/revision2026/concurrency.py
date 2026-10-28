@@ -5,7 +5,7 @@ import time
 
 from .common import file_lock, try_lock_handle, unlock_handle
 
-MODEL_LIMITS = {"glm": 4, "deepseek": 4}
+MODEL_LIMITS = {"glm": 2, "deepseek": 2}
 
 
 def pool_name(model):
